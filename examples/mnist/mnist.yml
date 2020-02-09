@@ -1,0 +1,46 @@
+logging:
+    tensorboard: true
+    sacred: False
+    mongodb_disable: False
+    mongodb_url: '131.175.120.153'
+    mongodb_port: 27017
+    mongodb_name: ''
+    logdir: './logs'
+    log_every: 10
+
+cudnn:
+    benchmark: False
+    deterministic: True
+
+dataset_name: 'mnist'
+datadir: './datasets'
+start_epoch: 0
+restart_path: ''
+use_new_dir: False
+reload_model: ''
+num_workers: 4
+
+only_test: False
+exp_name: 'mnist_example'
+device: 'cuda'
+cuda: true
+seed: 0
+
+# Optimizer
+max_epochs: 10
+batch_size: 100
+
+optimizer:
+    name: 'adam'
+    params:
+        lr: 0.001
+    regularizers:
+        weight_decay: 0.0
+
+# Early stopping
+early_stopping:
+    patience: 10
+    dataset: 'validation'
+    metric: 'y_acc'
+
+image_dims: (1, 28, 28)

@@ -1,0 +1,15 @@
+matplotlib
+munch
+numpy
+opencv-python
+Pillow
+pytest
+pudb
+requests
+ruamel.yaml
+sacred
+scipy
+scikit-learn
+scikit-image
+torch
+tqdm
