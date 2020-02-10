@@ -8,7 +8,7 @@ try:
 except CalledProcessError:
     __version__ = -1
 
-__author__ = 'Marco Ciccone et al.'
+__author__ = 'Marco Ciccone and Marco Cannici'
 __author_email__ = 'marco.ciccone@polimi.it'
 __license__ = 'Apache-2.0'
 __copyright__ = 'Copyright (c) 2018-2020, %s.' % __author__

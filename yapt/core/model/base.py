@@ -14,9 +14,13 @@ class BaseModel(ABC, nn.Module):
         self.logger = logger
         self.steps = 0
 
+        # -- Model
         self.build_model(**kwargs)
         self.reset_params()
-        self.configure_optimizer()
+
+        # -- Optimizers
+        self.configure_optimizers()
+        self.optimizers_schedulers = {}
 
     @abstractmethod
     def build_model(self) -> None:
@@ -27,7 +31,7 @@ class BaseModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def configure_optimizer(self) -> dict:
+    def configure_optimizers(self) -> dict:
         pass
 
     def schedulers(self, *args, **kwargs) -> None:

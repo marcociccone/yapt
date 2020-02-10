@@ -1,0 +1,3 @@
+# Default args
+logdir: './logs'
+log_every: 10

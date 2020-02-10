@@ -5,6 +5,7 @@ import argparse
 import itertools
 import os
 import warnings
+import collections.abc
 
 import munch
 from ruamel import yaml
@@ -30,8 +31,16 @@ def _parse_yaml(yaml_file):
 
     return yaml_config
 
+# Recursively update external_defaults with default_args
+def _update_dict(d, u):
+    for k, v in u.items():
+        if isinstance(v, collections.abc.Mapping):
+            d[k] = _update_dict(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
 
-def parse_configuration(default_config, dump_config=True, args_string=None):
+def parse_configuration(default_config, dump_config=True, args_string=None, external_defaults=None):
     """ Parses a default YAML configuration file, then optionally a custom configuration
         YAML file specified via command line, then finally any other command line arguments.
 
@@ -53,6 +62,11 @@ def parse_configuration(default_config, dump_config=True, args_string=None):
 
             args_string:
                 string with args to parse alternatively to sys.argv
+
+            external_defaults:
+                A 'dict' containing default values.
+                These values could be for instance collected from external
+                files or passed from other functions. They can be overrided.
 
         Returns:
             A `munch` object containing the final configuration, accessible via
@@ -76,12 +90,21 @@ def parse_configuration(default_config, dump_config=True, args_string=None):
                         help='custom configuration file, overrides defaults of specified parameters, relative to root')
     config_files, command_line_args = configfiles_parser.parse_known_args(args=args_string)
 
-    config_files.default_config = os.path.abspath(config_files.default_config)
+    default_args = {}
+    if default_config is not None:
+        config_files.default_config = os.path.abspath(config_files.default_config)
+        # Load default configuration
+        default_args = _parse_yaml(config_files.default_config)
+        # Can pass external defaults as dict
+        if external_defaults is not None:
+            default_args = _update_dict(external_defaults, default_args)
+    else:
+        assert external_defaults is not None, \
+            'One among `external_defaults` and `default_config` should be specified'
+
     if config_files.custom_config is not None:
         config_files.custom_config = os.path.abspath(config_files.custom_config)
 
-    # Load default configuration
-    default_args = _parse_yaml(config_files.default_config)
     config_wrapped = ConfigWrapper(default_args, dump_config)
 
     # Load custom configuration and overrides defaults

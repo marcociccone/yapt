@@ -1,12 +1,3 @@
-logging:
-    tensorboard: true
-    sacred: False
-    mongodb_disable: False
-    mongodb_url: '131.175.120.153'
-    mongodb_port: 27017
-    mongodb_name: ''
-    logdir: './logs'
-    log_every: 10
 
 cudnn:
     benchmark: False
@@ -30,6 +21,12 @@ seed: 0
 max_epochs: 10
 batch_size: 100
 
+# Network
+net_params:
+    hidden_dim: 100
+    drop_prob: 0.5
+    out_dim: 10
+
 optimizer:
     name: 'adam'
     params:
@@ -41,6 +38,7 @@ optimizer:
 early_stopping:
     patience: 10
     dataset: 'validation'
-    metric: 'y_acc'
+    metric: 'val_acc'
 
-image_dims: (1, 28, 28)
+input_dims: [1, 28, 28]
+

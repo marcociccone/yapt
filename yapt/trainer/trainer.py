@@ -19,6 +19,7 @@ from sacred.utils import apply_backspaces_and_linefeeds
 from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
 from yapt.utils.utils import safe_mkdirs
 from yapt.core.logger.tensorboardXsafe import SummaryWriter
+from yapt.core.confparser import configparser
 
 class DisableGradNotScriptContext:
     def __init__(self, model):
@@ -80,8 +81,7 @@ def _is_method(obj, name):
 
 class Trainer:
     def __init__(self,
-                 args,
-                 model_class:None,
+                 model_class=None,
                  data_loaders=None,
                  lr_scheduler=None,
                  params_scheduler=None,
@@ -89,9 +89,12 @@ class Trainer:
                  ):
 
         super().__init__()
+
+        self.set_defaults()
+        args = self.args
+
         self.verbose = True
         self.init_data = False
-        self.args = args
         self.use_cuda = args.cuda and torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
 
@@ -118,8 +121,8 @@ class Trainer:
         self.restart_path = args.restart_path
 
         # -- Logging
-        self.log_every = args.logging.log_every
-        self.use_sacred = args.logging.sacred
+        self.log_every = args.loggers.log_every
+        self.use_sacred = args.sacred.use_sacred
         if self.use_sacred:
             self.sacred_exp = Experiment(args.exp_name)
             self.sacred_exp.captured_out_filter = apply_backspaces_and_linefeeds
@@ -127,13 +130,13 @@ class Trainer:
             for source in self.get_sources():
                 self.sacred_exp.add_source_file(source)
 
-            if not args.logging.mongodb_disable:
+            if not args.sacred.mongodb_disable:
                 url = "{0.mongodb_url}:{0.mongodb_port}".format(args)
-                if (args.logging.mongodb_name is not None and
-                        args.logging.mongodb_name != ''):
-                    db_name = args.logging.mongodb_name
+                if (args.sacred.mongodb_name is not None and
+                        args.sacred.mongodb_name != ''):
+                    db_name = args.sacred.mongodb_name
                 else:
-                    db_name = 'ciccone_' + ''.join(filter(
+                    db_name = args.sacred.mongodb_prefix + ''.join(filter(
                         str.isalnum, args.dataset_name.lower()))
 
                 print('Connect to MongoDB@{}:{}'.format(url, db_name))
@@ -162,7 +165,27 @@ class Trainer:
                     self.restart_path)
         else:
             self.logdir = os.path.join(
-                args.logging.logdir, args.dataset_name.lower(), timestring)
+                args.loggers.logdir, args.dataset_name.lower(), timestring)
+
+    def set_defaults(self):
+        # retrieve module path
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        dir_path = os.path.split(dir_path)[0]
+        # get all the default yaml configs with glob
+        dir_path = os.path.join(dir_path, 'configs', '*.yml')
+
+        self.defaults_path = {}
+        self.defaults_args = {}
+        for file in glob.glob(dir_path):
+            # split filename from path to create key and val
+            key = os.path.splitext(os.path.split(file)[1])[0]
+            self.defaults_path[key] = file
+            # parse default args
+            self.defaults_args[key] = configparser._parse_yaml(file)
+
+        self.args = configparser.parse_configuration(
+            self.default_config, dump_config=True,
+            external_defaults=self.defaults_args)
 
     def print_verbose(self, message):
         if self.verbose:
@@ -204,7 +227,8 @@ class Trainer:
         self.train_loader = data_loaders['train']
         self.val_loader = data_loaders.get('val', None)
         self.test_loader = data_loaders.get('test', None)
-        self.semi_supervised = self.args.semi_supervised
+
+        self.semi_supervised = self.args.trainer.semi_supervised
 
         if self.semi_supervised:
             assert isinstance(self.train_loader, dict), \
@@ -337,6 +361,240 @@ class Trainer:
         self.best_epoch_score = checkpoint['best_epoch_score']
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
+    def to_device(self, tensor_list):
+        return to_device(tensor_list, self.device)
+
+    def collect_outputs(self, outputs):
+        """
+        Collect outputs of training_step for each training epoch
+        """
+        # TODO: check this, I think it could be generalized
+        if outputs is not None and len(outputs.keys()) > 0:
+            outputs = detach_dict(outputs)
+            self.outputs_train[-1].append(outputs)
+
+    def call_optimizers_schedulers(self):
+
+        schedulers = self.model.optimizers_schedulers
+
+        if isinstance(schedulers, torch.optim.lr_scheduler._LRScheduler):
+            schedulers.step()
+
+        elif isinstance(schedulers, dict):
+            for _, scheduler in schedulers.items():
+                scheduler.step()
+        else:
+            raise ValueError(
+                "optimizers_schedulers should be a \
+                dict or a torch.optim.lr_scheduler._LRScheduler object")
+
+    def log_each_epoch(self, logger):
+        # -- Log learning rates
+        optimizers = self.model.optimizer
+        if isinstance(optimizers, torch.optim.Optimizer):
+            current_lr = optimizers.param_groups[0]['lr']
+            logger.add_scalar('optim/lr', current_lr, self.epoch)
+
+        elif isinstance(optimizers, dict):
+            for key, opt in optimizers.items():
+                current_lr = opt.param_groups[0]['lr']
+                logger.add_scalar(
+                    'optim/lr_{}'.format(key), current_lr, self.epoch)
+        else:
+            raise ValueError(
+                "optimizer should be a dict or a \
+                torch.optim.Optimizer object")
+
+        # -- TODO: add anything else to be logged here
+
+    def train_epoch(self, dataloader, logger=None):
+        """
+        Performs one entire epoch of training
+        :param dataloader: A DataLoader object producing training samples
+        :return: a tuple (epoch_loss, epoch_accuracy)
+        """
+
+        # -- Initialization and training mode
+
+        # Enters train mode
+        self.model.train()
+        # Zero the parameter gradients
+        self.model.zero_grad()
+        # Track training statistist
+        self.model.init_train_stats()
+        self.outputs_train.append([])
+
+        pbar_descr_prefix = "Epoch %d (best: %d, beaten: %d) - " % (
+            self.epoch, self.best_epoch, self.beaten_epochs)
+
+        with tqdm(total=self.num_batches_train,
+                  ncols=80, dynamic_ncols=False,
+                  desc=pbar_descr_prefix, leave=False) as pbar:
+
+            # -- Start epoch
+            for batch_idx, batch in enumerate(dataloader):
+                device_batch = self.to_device(batch)
+
+                # -- Model specific schedulers
+                self.model.schedulers(self.epoch, logger=logger)
+
+                # -- Execute a training step
+                outputs = self.model.training_step(device_batch)
+
+                # -- Save output for each training step
+                self.collect_outputs(outputs)
+
+                # -- Eventually log statistics on tensorboard
+                if self.model.steps % self.log_every == 0:
+                    self.model.log_train(outputs.get('stats', dict()), logger)
+
+                pbar.set_description(
+                    pbar_descr_prefix +
+                    outputs.get('running_tqdm', ''))
+                pbar.update()
+
+            # -- End Epoch
+            self.model.reset_train_stats()
+
+            pbar.clear()
+            print(pbar_descr_prefix +
+                  self.outputs_train[-1][-1].get('final_tqdm', ''))
+
+        return self.outputs_train[-1]
+
+    @main_ifsacred
+    def fit(self):
+        """
+         A complete training procedure by performing early stopping using the provided validation set
+        """
+
+        self.seen = 0
+        self.epoch = 1
+        self.best_epoch = 0
+        self.beaten_epochs = 0
+        self.best_epoch_score = 0
+        self.best_epoch_output_train = dict()
+        self.best_epoch_output_val = dict()
+
+        # Loads the initial checkpoint if provided
+        if self.restart_path != '':
+            self.restart_exp()
+
+        safe_mkdirs(self.logdir, exist_ok=True)
+        logger = SummaryWriter(log_dir=self.logdir)
+        self.log_params(logger)
+        self.json_params(self.logdir)
+
+        print("Early stopping: set {} - metric {} - patience {}".format(
+            self.early_stopping.dataset,
+            self.early_stopping.metric,
+            self.early_stopping.patience
+        ))
+
+        while (self.beaten_epochs < self.patience and
+               self.epoch < self.max_epochs):
+
+            if self.semi_supervised:
+                if self.args.alternated_update:
+                    train_loader = alternate_datasets(
+                        iter(self.train_loader['labelled']),
+                        iter(self.train_loader['unlabelled']))
+                else:
+                    train_loader = zip(
+                        islice(cycle(self.train_loader['labelled']),
+                               self.num_batches_train),
+                        self.train_loader['unlabelled'])
+            else:
+                train_loader = self.train_loader['labelled']
+
+            # -- Call Optimizer schedulers and track lr
+            self.call_optimizers_schedulers()
+            self.log_each_epoch(logger)
+
+            # TODO: don't remember what is this
+            # if self.params_scheduler is not None:
+            #     self.params_scheduler.step()
+
+            # -- Performs one epoch of training
+            output_train = self.train_epoch(train_loader, logger=logger)
+            self.save_checkpoint(self.logdir, "epoch%d.ckpt" % self.epoch)
+
+            # -- Validate the network against the validation set
+
+            output_val = dict()
+            for kk, vv in self.val_loader.items():
+                output_val[kk] = self.validate(
+                    vv, log_descr=kk, logger=logger)
+            print("")
+
+            is_best_epoch, best_score = self.model.early_stopping(
+                output_val, self.best_epoch_output_val)
+
+            if is_best_epoch or self.epoch == 1:
+                self.best_epoch = self.epoch
+                self.best_epoch_score = best_score
+                self.best_epoch_output_train = output_train
+                self.best_epoch_output_val = output_val
+                self.beaten_epochs = 0
+            else:
+                self.beaten_epochs += 1
+
+            self.epoch += 1
+
+        print("Reloading best epoch %d checkpoint" % self.best_epoch)
+        self.load_checkpoint(self.logdir, "epoch%d.ckpt" % self.best_epoch)
+
+        if self.test_loader is not None:
+            # TODO !!!
+            output_test = self.validate(
+                self.test_loader, log_descr="test", logger=logger)
+            self.json_results(self.logdir, output_test)
+            # self.log_sacred_scalar("test/accuracy", , self.epoch)
+        else:
+            output_test = output_val[kk]
+
+        return output_test
+
+    def validate(self, dataloader, log_descr="validation", logger=None):
+        """
+        Computes the accuracy of the network against a validation set
+        :param dataloader: A DataLoader object producing validation/test samples
+        :return: the accuracy over the validation dataset
+        """
+        if dataloader is None:
+            return {}
+
+        # Enters eval mode
+        self.model.eval()
+        self.model.init_val_stats()
+
+        pbar_descr_prefix = "    %s - " % log_descr.title()
+        # Disable network grad while evaluating the model
+        with no_grad_ifnotscript(self.model):
+            with tqdm(total=len(dataloader), ncols=80, dynamic_ncols=False,
+                      desc=pbar_descr_prefix, leave=False) as pbar:
+
+                for batch_idx, batch in enumerate(dataloader):
+                    device_batch = self.to_device(batch)
+                    outputs = self.model.validation_step(
+                        device_batch, self.epoch)
+
+                    pbar.set_description(
+                        pbar_descr_prefix + outputs.get('running_tqdm', ''))
+                    pbar.update()
+
+                if logger is not None:
+                    self.model.log_val(
+                        self.epoch, log_descr,
+                        outputs.get('stats', dict()), logger)
+                self.model.reset_val_stats()
+
+                pbar.clear()
+                print("    %s - %s" % (
+                      log_descr.title(), outputs.get('final_tqdm', '')))
+
+        return outputs
+
     def only_test(self):
         # Loads the last checkpoint
         if self.restart_path != '':
@@ -397,210 +655,3 @@ class Trainer:
                 out_dict[key] = torch.cat(val, dim=0)
 
         return out_dict
-
-    @main_ifsacred
-    def fit(self):
-        """
-         A complete training procedure by performing early stopping using the provided validation set
-        """
-
-        self.seen = 0
-        self.epoch = 1
-        self.best_epoch = 0
-        self.beaten_epochs = 0
-        self.best_epoch_score = 0
-        self.best_epoch_output_train = dict()
-        self.best_epoch_output_val = dict()
-
-        # Loads the initial checkpoint if provided
-        if self.restart_path != '':
-            self.restart_exp()
-
-        safe_mkdirs(self.logdir, exist_ok=True)
-        logger = SummaryWriter(log_dir=self.logdir)
-        self.log_params(logger)
-        self.json_params(self.logdir)
-
-        print("Early stopping: set {} - metric {} - patience {}".format(
-            self.early_stopping.dataset,
-            self.early_stopping.metric,
-            self.early_stopping.patience
-        ))
-
-        while (self.beaten_epochs < self.patience and
-               self.epoch < self.max_epochs):
-
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step()
-            if self.params_scheduler is not None:
-                self.params_scheduler.step()
-
-            if self.semi_supervised:
-                if self.args.alternated_update:
-                    train_loader = alternate_datasets(
-                        iter(self.train_loader['labelled']),
-                        iter(self.train_loader['unlabelled']))
-                else:
-                    train_loader = zip(
-                        islice(cycle(self.train_loader['labelled']),
-                               self.num_batches_train),
-                        self.train_loader['unlabelled'])
-            else:
-                train_loader = self.train_loader['labelled']
-
-            # -- Performs one epoch of training
-            output_train = self.train_epoch(train_loader, logger=logger)
-            self.save_checkpoint(self.logdir, "epoch%d.ckpt" % self.epoch)
-
-            # -- Validate the network against the validation set
-
-            output_val = dict()
-            for kk, vv in self.val_loader.items():
-                output_val[kk] = self.validate(
-                    vv, log_descr=kk, logger=logger)
-            print("")
-
-            is_best_epoch, best_score = self.model.early_stopping(
-                output_val, self.best_epoch_output_val)
-
-            if is_best_epoch or self.epoch == 1:
-                self.best_epoch = self.epoch
-                self.best_epoch_score = best_score
-                self.best_epoch_output_train = output_train
-                self.best_epoch_output_val = output_val
-                self.beaten_epochs = 0
-            else:
-                self.beaten_epochs += 1
-
-            self.epoch += 1
-
-        print("Reloading best epoch %d checkpoint" % self.best_epoch)
-        self.load_checkpoint(self.logdir, "epoch%d.ckpt" % self.best_epoch)
-
-        if self.test_loader is not None:
-            # TODO !!!
-            output_test = self.validate(
-                self.test_loader, log_descr="test", logger=logger)
-            self.json_results(self.logdir, output_test)
-            # self.log_sacred_scalar("test/accuracy", , self.epoch)
-        else:
-            output_test = output_val[kk]
-
-        return output_test
-
-    # def log_each_epoch(self):
-    #     current_lr = self.optimizer.param_groups[0]['lr']
-    #     print('current lr {:.5e}'.format(current_lr))
-    #     self.logger.add_scalar('train/lr', current_lr, self.epoch)
-
-    def train_epoch(self, dataloader, logger=None):
-        """
-        Performs one entire epoch of training
-        :param dataloader: A DataLoader object producing training samples
-        :return: a tuple (epoch_loss, epoch_accuracy)
-        """
-
-        # -- Initialization and training mode
-
-        # Enters train mode
-        self.model.train()
-        # Zero the parameter gradients
-        self.model.zero_grad()
-        # Track training statistist
-        self.model.init_train_stats()
-        self.outputs_train.append([])
-
-        pbar_descr_prefix = "Epoch %d (best: %d, beaten: %d) - " % (
-            self.epoch, self.best_epoch, self.beaten_epochs)
-
-        with tqdm(total=self.num_batches_train,
-                  ncols=80, dynamic_ncols=False,
-                  desc=pbar_descr_prefix, leave=False) as pbar:
-
-            # TODO: hyper parameters schedulers (Create a class?)
-
-            # -- Start epoch
-            for batch_idx, batch in enumerate(dataloader):
-                device_batch = self.to_device(batch)
-
-                # -- TODO:
-                # 1. log_at_each_epoch
-
-                # -- Model specific schedulers
-                self.model.schedulers(self.epoch, logger=logger)
-
-                # -- Execute a training step
-                outputs = self.model.training_step(device_batch)
-
-                # -- Save output for each training step
-                self.collect_outputs(outputs)
-
-                # -- Eventually log statistics on tensorboard
-                if self.model.steps % self.log_every == 0:
-                    self.model.log_train(outputs.get('stats', dict()), logger)
-
-                pbar.set_description(
-                    pbar_descr_prefix +
-                    outputs.get('running_tqdm', ''))
-                pbar.update()
-
-            # -- End Epoch
-            self.model.reset_train_stats()
-
-            pbar.clear()
-            print(pbar_descr_prefix +
-                  self.outputs_train[-1][-1].get('final_tqdm', ''))
-
-        return self.outputs_train[-1]
-
-    def to_device(self, tensor_list):
-        return to_device(tensor_list, self.device)
-
-    def collect_outputs(self, outputs):
-        """
-        Collect outputs of training_step for each training epoch
-        """
-
-        if outputs is not None and len(outputs.keys()) > 0:
-            outputs = detach_dict(outputs)
-            self.outputs_train[-1].append(outputs)
-
-    def validate(self, dataloader, log_descr="validation", logger=None):
-        """
-        Computes the accuracy of the network against a validation set
-        :param dataloader: A DataLoader object producing validation/test samples
-        :return: the accuracy over the validation dataset
-        """
-        if dataloader is None:
-            return {}
-
-        # Enters eval mode
-        self.model.eval()
-        self.model.init_val_stats()
-
-        pbar_descr_prefix = "    %s - " % log_descr.title()
-        # Disable network grad while evaluating the model
-        with no_grad_ifnotscript(self.model):
-            with tqdm(total=len(dataloader), ncols=80, dynamic_ncols=False,
-                      desc=pbar_descr_prefix, leave=False) as pbar:
-
-                for batch_idx, batch in enumerate(dataloader):
-                    device_batch = self.to_device(batch)
-                    outputs = self.model.validation_step(
-                        device_batch, self.epoch)
-
-                    pbar.set_description(
-                        pbar_descr_prefix + outputs.get('running_tqdm', ''))
-                    pbar.update()
-
-                if logger is not None:
-                    self.model.log_val(
-                        self.epoch, log_descr,
-                        outputs.get('stats', dict()), logger)
-                self.model.reset_val_stats()
-
-                pbar.clear()
-                print("    %s - %s" % (
-                      log_descr.title(), outputs.get('final_tqdm', '')))
-
-        return outputs

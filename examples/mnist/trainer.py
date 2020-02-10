@@ -2,10 +2,11 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 from yapt import Trainer
-from yapt.configparser import parse_configuration
-from .model import Classifier
+from model import Classifier
 
 class TrainerMNIST(Trainer):
+
+    default_config = 'mnist.yml'
 
     def set_data_loaders(self):
         args = self.args
@@ -22,10 +23,11 @@ class TrainerMNIST(Trainer):
                            transform=transforms.ToTensor()),
             batch_size=args.batch_size, shuffle=False, **kwargs)
 
+        # TODO: should it be returned or set?
+        # is the name correct, is a setter?
+        return data_loaders
+
 if __name__ == "__main__":
 
-    default_config = "mnist.yml"
-    args = parse_configuration(default_config, dump_config=False)
-
-    trainer = TrainerMNIST(args=args, model_class=Classifier)
+    trainer = TrainerMNIST(model_class=Classifier)
     trainer.fit()
