@@ -4,17 +4,11 @@ import sys
 import glob
 import json
 import torch
-import inspect
-import functools
 import numpy as np
 
 from itertools import cycle, islice
 from tqdm import tqdm
 from time import gmtime, strftime
-
-from sacred import Experiment
-from sacred.observers import MongoObserver
-from sacred.utils import apply_backspaces_and_linefeeds
 
 from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
 from yapt.utils.utils import safe_mkdirs
@@ -54,37 +48,11 @@ class DisableGradNotScriptContext:
 # Rename class for convenience
 no_grad_ifnotscript = DisableGradNotScriptContext
 
-
-def main_ifsacred(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        self = args[0]
-        # Check at run-time if sacred has to be used
-        if self.use_sacred:
-            # If this is the case, wrap the function
-            @self.sacred_exp.main
-            def decor_func():
-                return func(*args, **kwargs)
-
-            # and run it through sacred run()
-            self.sacred_exp.run()
-        else:
-            # Otherwise just run the function
-            return func(*args, **kwargs)
-
-    return wrapper
-
-
-def _is_method(obj, name):
-    return hasattr(obj, name) and inspect.ismethod(getattr(obj, name))
-
-
 class Trainer:
     def __init__(self,
                  model_class=None,
                  data_loaders=None,
-                 lr_scheduler=None,
-                 params_scheduler=None,
+                 # params_scheduler=None,
                  init_seeds=True,
                  ):
 
@@ -110,9 +78,7 @@ class Trainer:
         model = self.set_model() if model_class is None else model_class(args)
         self.model = model.to(self.device)
 
-        # -- Optimization # TODO: Move inside model
-        self.lr_scheduler = lr_scheduler
-        self.params_scheduler = params_scheduler
+        # self.params_scheduler = params_scheduler
 
         # -- Early Stopping
         self.max_epochs = args.max_epochs
@@ -122,25 +88,6 @@ class Trainer:
 
         # -- Logging
         self.log_every = args.loggers.log_every
-        self.use_sacred = args.sacred.use_sacred
-        if self.use_sacred:
-            self.sacred_exp = Experiment(args.exp_name)
-            self.sacred_exp.captured_out_filter = apply_backspaces_and_linefeeds
-            self.sacred_exp.add_config(vars(args))
-            for source in self.get_sources():
-                self.sacred_exp.add_source_file(source)
-
-            if not args.sacred.mongodb_disable:
-                url = "{0.mongodb_url}:{0.mongodb_port}".format(args)
-                if (args.sacred.mongodb_name is not None and
-                        args.sacred.mongodb_name != ''):
-                    db_name = args.sacred.mongodb_name
-                else:
-                    db_name = args.sacred.mongodb_prefix + ''.join(filter(
-                        str.isalnum, args.dataset_name.lower()))
-
-                print('Connect to MongoDB@{}:{}'.format(url, db_name))
-                self.sacred_exp.observers.append(MongoObserver.create(url=url, db_name=db_name))
 
         self.seen = 0
         self.epoch = 0
@@ -258,23 +205,6 @@ class Trainer:
 
         self.init_data = True
 
-    def get_sources(self):
-        sources = []
-        # The network file
-        sources.append(inspect.getfile(self.model.__class__))
-        # the main script
-        sources.append(sys.argv[0])
-        # and any user custom submodule
-        for module in self.model.children():
-            module_path = inspect.getfile(module.__class__)
-            if 'site-packages' not in module_path:
-                sources.append(module_path)
-        return sources
-
-    def log_sacred_scalar(self, name, val, step):
-        if self.use_sacred and self.sacred_exp.current_run:
-            self.sacred_exp.current_run.log_scalar(name, val, step)
-
     def log_params(self, logger):
         name_str = os.path.basename(sys.argv[0])
         args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self.args).items())])[:-2]
@@ -303,9 +233,6 @@ class Trainer:
 
             with open(json_path, 'w') as fp:
                 json.dump(results, fp)
-
-            if self.use_sacred and self.sacred_exp.current_run:
-                self.sacred_exp.current_run.current_run.add_artifact(json_path)
 
         except Exception as e:
             print("An error occurred while saving results into JSON:")
@@ -462,7 +389,6 @@ class Trainer:
 
         return self.outputs_train[-1]
 
-    @main_ifsacred
     def fit(self):
         """
          A complete training procedure by performing early stopping using the provided validation set
@@ -549,7 +475,6 @@ class Trainer:
             output_test = self.validate(
                 self.test_loader, log_descr="test", logger=logger)
             self.json_results(self.logdir, output_test)
-            # self.log_sacred_scalar("test/accuracy", , self.epoch)
         else:
             output_test = output_val[kk]
 
@@ -609,12 +534,6 @@ class Trainer:
             output_test = self.validate(
                 self.test_loader, log_descr="test", logger=None)
             self.json_results(self.logdir, output_test)
-            # self.log_sacred_scalar("test/accuracy", , self.epoch)
-            # (test_acc, test_precision,
-            #  test_recall, test_f1,
-            #  test_auc) = self.model.final_test(self.test_loader)
-            # print('test acc {:.2f}, prec {:.2f}, recall {:.2f}, f1 {:.2f}, roc_auc {:.2f}\n'.format(
-            #     test_acc, test_precision, test_recall, test_f1, test_auc))
             return output_test
 
     def test(self, dataloader, to_numpy=True):

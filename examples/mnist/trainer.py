@@ -1,10 +1,10 @@
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
-from yapt import Trainer
+from yapt import SacredTrainer
 from model import Classifier
 
-class TrainerMNIST(Trainer):
+class TrainerMNIST(SacredTrainer):
 
     default_config = 'mnist.yml'
 
