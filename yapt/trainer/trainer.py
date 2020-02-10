@@ -50,6 +50,7 @@ no_grad_ifnotscript = DisableGradNotScriptContext
 
 class Trainer:
     def __init__(self,
+                 extra_args=dict(),
                  model_class=None,
                  data_loaders=None,
                  # params_scheduler=None,
@@ -58,7 +59,7 @@ class Trainer:
 
         super().__init__()
 
-        self.set_defaults()
+        self.set_defaults(extra_args)
         args = self.args
 
         self.verbose = True
@@ -114,7 +115,7 @@ class Trainer:
             self.logdir = os.path.join(
                 args.loggers.logdir, args.dataset_name.lower(), timestring)
 
-    def set_defaults(self):
+    def set_defaults(self, extra_args=dict()):
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
         dir_path = os.path.split(dir_path)[0]
@@ -132,7 +133,8 @@ class Trainer:
 
         self.args = configparser.parse_configuration(
             self.default_config, dump_config=True,
-            external_defaults=self.defaults_args)
+            external_defaults=self.defaults_args,
+            extra_args=extra_args)
 
     def print_verbose(self, message):
         if self.verbose:

@@ -40,7 +40,8 @@ def _update_dict(d, u):
             d[k] = v
     return d
 
-def parse_configuration(default_config, dump_config=True, args_string=None, external_defaults=None):
+def parse_configuration(default_config, dump_config=True,
+                        args_string=None, external_defaults=None, extra_args=None):
     """ Parses a default YAML configuration file, then optionally a custom configuration
         YAML file specified via command line, then finally any other command line arguments.
 
@@ -67,6 +68,11 @@ def parse_configuration(default_config, dump_config=True, args_string=None, exte
                 A 'dict' containing default values.
                 These values could be for instance collected from external
                 files or passed from other functions. They can be overrided.
+
+            extra_args:
+                A 'dict' of args, this is the last layer of override.
+                Mostly helpful when generating custom arguments from code,
+                to run tons of experiments.
 
         Returns:
             A `munch` object containing the final configuration, accessible via
@@ -107,7 +113,7 @@ def parse_configuration(default_config, dump_config=True, args_string=None, exte
 
     config_wrapped = ConfigWrapper(default_args, dump_config)
 
-    # Load custom configuration and overrides defaults
+    # -- Load custom configuration and overrides defaults
     if config_files.custom_config:
         custom_args = _parse_yaml(config_files.custom_config)
         if custom_args:
@@ -122,6 +128,12 @@ def parse_configuration(default_config, dump_config=True, args_string=None, exte
 
     # Overrides with command line args
     config_wrapped.override_with(cmdline_args)
+
+    # Extra args are used to override from dictionary
+    # TODO: not sure if should be after or before command line
+    if extra_args is not None:
+        assert isinstance(extra_args, dict), 'extra_args should be a dict'
+        config_wrapped.override_with(extra_args)
 
     # Finalize and munchify the configuration
     config_wrapped.finalize()
