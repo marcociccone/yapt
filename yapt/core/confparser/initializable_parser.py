@@ -1,4 +1,5 @@
 import argparse
+from pprint import pprint
 
 class InitializableParser(argparse.ArgumentParser):
     """ A sublclass of `argparse.ArgumentParser`, allowing initialization from
@@ -33,8 +34,14 @@ class InitializableParser(argparse.ArgumentParser):
                 A `Namespace` containing only the arguments which have been
                 explicitly parsed.
         """
-        parsed_args = super().parse_args(args_string).__dict__
-        filtered_args = {k: v for k, v in parsed_args.items() if v is not None}
+        parsed_args, unknown = super().parse_known_args(args_string)
+
+        if unknown:
+            print("WARNING: unknown command-line arguments")
+            pprint(unknown)
+
+        filtered_args = {k: v for k, v in parsed_args.__dict__.items()
+                         if v is not None}
 
         return filtered_args
 

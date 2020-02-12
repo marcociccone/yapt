@@ -4,9 +4,10 @@ from torch.utils.data import DataLoader
 from yapt import SacredTrainer
 from model import Classifier
 
+
 class TrainerMNIST(SacredTrainer):
 
-    default_config = 'mnist.yml'
+    default_config = '/home/ciccone/exp/yapt/examples/mnist/mnist.yml'
 
     def set_data_loaders(self):
         args = self.args
@@ -26,6 +27,7 @@ class TrainerMNIST(SacredTrainer):
         # TODO: should it be returned or set?
         # is the name correct, is a setter?
         return data_loaders
+
 
 if __name__ == "__main__":
 

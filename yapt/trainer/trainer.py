@@ -115,6 +115,9 @@ class Trainer:
             self.logdir = os.path.join(
                 args.loggers.logdir, args.dataset_name.lower(), timestring)
 
+        safe_mkdirs(self.logdir, exist_ok=True)
+        self.logger = SummaryWriter(log_dir=self.logdir)
+
     def set_defaults(self, extra_args=dict()):
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -207,10 +210,10 @@ class Trainer:
 
         self.init_data = True
 
-    def log_params(self, logger):
+    def log_params(self):
         name_str = os.path.basename(sys.argv[0])
         args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self.args).items())])[:-2]
-        logger.add_text("Script arguments", name_str + " -> " + args_str)
+        self.logger.add_text("Script arguments", name_str + " -> " + args_str)
 
     def json_params(self, savedir):
         try:
@@ -267,17 +270,19 @@ class Trainer:
         safe_mkdirs(path, exist_ok=True)
 
         try:
+            filename = os.path.join(path, filename)
             torch.save({'seen': self.seen,
                         'epoch': self.epoch,
                         'best_epoch': self.best_epoch,
                         'beaten_epochs': self.beaten_epochs,
                         'best_epoch_score': self.best_epoch_score,
                         'model_state_dict': self.model.state_dict(),
-                        }, os.path.join(path, filename))
+                        }, filename)
 
         except Exception as e:
             print("An error occurred while saving the checkpoint:")
             print(e)
+        return filename
 
     def load_checkpoint(self, path, filename):
         ckpt_path = os.path.join(path, filename)
@@ -317,17 +322,17 @@ class Trainer:
                 "optimizers_schedulers should be a \
                 dict or a torch.optim.lr_scheduler._LRScheduler object")
 
-    def log_each_epoch(self, logger):
+    def log_each_epoch(self):
         # -- Log learning rates
         optimizers = self.model.optimizer
         if isinstance(optimizers, torch.optim.Optimizer):
             current_lr = optimizers.param_groups[0]['lr']
-            logger.add_scalar('optim/lr', current_lr, self.epoch)
+            self.logger.add_scalar('optim/lr', current_lr, self.epoch)
 
         elif isinstance(optimizers, dict):
             for key, opt in optimizers.items():
                 current_lr = opt.param_groups[0]['lr']
-                logger.add_scalar(
+                self.logger.add_scalar(
                     'optim/lr_{}'.format(key), current_lr, self.epoch)
         else:
             raise ValueError(
@@ -336,7 +341,7 @@ class Trainer:
 
         # -- TODO: add anything else to be logged here
 
-    def train_epoch(self, dataloader, logger=None):
+    def train_epoch(self, dataloader):
         """
         Performs one entire epoch of training
         :param dataloader: A DataLoader object producing training samples
@@ -365,7 +370,7 @@ class Trainer:
                 device_batch = self.to_device(batch)
 
                 # -- Model specific schedulers
-                self.model.schedulers(self.epoch, logger=logger)
+                self.model.schedulers(self.epoch, logger=self.logger)
 
                 # -- Execute a training step
                 outputs = self.model.training_step(device_batch)
@@ -375,7 +380,7 @@ class Trainer:
 
                 # -- Eventually log statistics on tensorboard
                 if self.model.steps % self.log_every == 0:
-                    self.model.log_train(outputs.get('stats', dict()), logger)
+                    self.model.log_train(outputs.get('stats', dict()), self.logger)
 
                 pbar.set_description(
                     pbar_descr_prefix +
@@ -408,9 +413,7 @@ class Trainer:
         if self.restart_path != '':
             self.restart_exp()
 
-        safe_mkdirs(self.logdir, exist_ok=True)
-        logger = SummaryWriter(log_dir=self.logdir)
-        self.log_params(logger)
+        self.log_params()
         self.json_params(self.logdir)
 
         print("Early stopping: set {} - metric {} - patience {}".format(
@@ -437,14 +440,14 @@ class Trainer:
 
             # -- Call Optimizer schedulers and track lr
             self.call_optimizers_schedulers()
-            self.log_each_epoch(logger)
+            self.log_each_epoch()
 
             # TODO: don't remember what is this
             # if self.params_scheduler is not None:
             #     self.params_scheduler.step()
 
             # -- Performs one epoch of training
-            output_train = self.train_epoch(train_loader, logger=logger)
+            output_train = self.train_epoch(train_loader)
             self.save_checkpoint(self.logdir, "epoch%d.ckpt" % self.epoch)
 
             # -- Validate the network against the validation set
@@ -452,7 +455,7 @@ class Trainer:
             output_val = dict()
             for kk, vv in self.val_loader.items():
                 output_val[kk] = self.validate(
-                    vv, log_descr=kk, logger=logger)
+                    vv, log_descr=kk, logger=self.logger)
             print("")
 
             is_best_epoch, best_score = self.model.early_stopping(
@@ -475,7 +478,7 @@ class Trainer:
         if self.test_loader is not None:
             # TODO !!!
             output_test = self.validate(
-                self.test_loader, log_descr="test", logger=logger)
+                self.test_loader, log_descr="test", logger=None)
             self.json_results(self.logdir, output_test)
         else:
             output_test = output_val[kk]

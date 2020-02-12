@@ -130,7 +130,6 @@ def parse_configuration(default_config, dump_config=True,
     config_wrapped.override_with(cmdline_args)
 
     # Extra args are used to override from dictionary
-    # TODO: not sure if should be after or before command line
     if extra_args is not None:
         assert isinstance(extra_args, dict), 'extra_args should be a dict'
         config_wrapped.override_with(extra_args)
