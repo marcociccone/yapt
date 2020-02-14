@@ -88,6 +88,7 @@ class BaseTrainer(ABC):
                 deepcopy(self.defaults_args['defaults']))
             del self.defaults_args['defaults']
 
+        self.extra_args = extra_args
         self.args = configparser.parse_configuration(
             self.default_config, dump_config=True,
             external_defaults=self.defaults_args,
@@ -284,5 +285,15 @@ class BaseTrainer(ABC):
         # -- TODO: add anything else to be logged here
 
     @abstractmethod
-    def fit(self):
+    def _fit(self):
         pass
+
+    def fit(self):
+        if self.args.dry_run:
+            from pprint import pprint
+            print(self.args.dumps.string_yaml)
+            pprint(self.extra_args)
+        else:
+            self._fit()
+
+

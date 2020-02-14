@@ -133,7 +133,7 @@ class Trainer(SacredTrainer):
 
         return self.outputs_train[-1]
 
-    def fit(self):
+    def _fit(self):
         """
          A complete training procedure by performing early stopping using the provided validation set
         """

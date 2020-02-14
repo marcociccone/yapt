@@ -11,9 +11,6 @@ num_workers: 4
 
 only_test: False
 exp_name: 'mnist_example'
-device: 'cuda'
-cuda: true
-seed: 0
 
 # Optimizer
 max_epochs: 10
