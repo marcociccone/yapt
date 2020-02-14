@@ -15,6 +15,17 @@ from .config_wrapper import ConfigWrapper
 from .initializable_parser import InitializableParser
 
 
+class DefaultNoneMunch(munch.DefaultMunch):
+    def __init__(self, *args, **kwargs):
+        """ Construct a new DefaultMunch. Like collections.defaultdict, the
+            first argument is the default value; subsequent arguments are the
+            same as those for dict.
+        """
+        # Mimic collections.defaultdict constructor
+        super().__init__(*args, **kwargs)
+        self.__default__ = None
+
+
 def _parse_yaml(yaml_file):
     """ Opens and parses a YAML file.
 
@@ -136,14 +147,16 @@ def parse_configuration(default_config, dump_config=True,
 
     # Finalize and munchify the configuration
     config_wrapped.finalize()
-    run_config = munch.munchify(config_wrapped.config)
+    run_config = munch.munchify(
+        config_wrapped.config,
+        factory=DefaultNoneMunch)
     return run_config
 
 
 def flatten_configuration(munch):
     # Retrieve args as list of (k, v) arg pairs
     # Prepend '--' to arg keys and reverts numeric values to strings
-    args_tuples = [_parse_argument(key, value) for (key,value) in munch.items()]
+    args_tuples = [_parse_argument(key, value) for (key, value) in munch.items()]
     # Flattens list of tuples in single list
     args_flatlist = list(itertools.chain(*args_tuples))
     return args_flatlist
@@ -151,9 +164,9 @@ def flatten_configuration(munch):
 
 def _parse_argument(key, value):
 
-    if value == True and type(value) == bool:
+    if value and isinstance(value, bool):
         return (['--' + key])
-    if value == False and type(value) == bool:
+    if not value and isinstance(value, bool):
         return(['--no-' + key])
 
     return ('--' + key, str(value))

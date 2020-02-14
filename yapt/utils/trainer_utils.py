@@ -59,13 +59,13 @@ def to_device(tensor_list, device):
                 new_tensors.append(tensor.to(device))
             else:
                 new_tensors.append(to_device(tensor, device))
-
         return new_tensors
 
     elif isinstance(tensor_list, dict):
         new_tensors = {}
         for key, val in tensor_list.items():
             new_tensors[key] = to_device(val, device)
+        return new_tensors
 
     elif isinstance(tensor_list, torch.Tensor):
         return tensor_list.to(device)

@@ -6,7 +6,7 @@ import inspect
 from sacred import Experiment
 from sacred.observers import MongoObserver
 from sacred.utils import apply_backspaces_and_linefeeds
-from yapt import Trainer
+from yapt import BaseTrainer
 
 
 def main_ifsacred(func):
@@ -28,7 +28,8 @@ def main_ifsacred(func):
 
     return wrapper
 
-class SacredTrainer(Trainer):
+
+class SacredTrainer(BaseTrainer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

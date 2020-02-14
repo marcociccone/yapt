@@ -1,11 +1,11 @@
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
-from yapt import SacredTrainer
+from yapt import Trainer
 from model import Classifier
 
 
-class TrainerMNIST(SacredTrainer):
+class TrainerMNIST(Trainer):
 
     default_config = '/home/ciccone/exp/yapt/examples/mnist/mnist.yml'
 

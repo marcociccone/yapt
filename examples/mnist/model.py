@@ -36,26 +36,27 @@ class Classifier(BaseModel):
 
         return logits
 
-    def configure_optimizers(self):
+    def configure_optimizer(self):
         args = self.args
         opt_params = self.args.optimizer.params.toDict()
         weight_decay = self.args.optimizer.regularizers.weight_decay
 
         # -- Get optimizer from args
-        optimizer = get_optimizer(args.optimizer.name)
+        opt_class = get_optimizer(args.optimizer.name)
 
         # -- Instantiate optimizer with specific parameters
-        self.optimizer = optimizer(
-            self.parameters(), weight_decay=weight_decay, **opt_params)
+        optimizer = opt_class(self.parameters(),
+                        weight_decay=weight_decay, **opt_params)
+        return optimizer
 
+    def configure_scheduler_optimizer(self):
         # -- LR scheduler
-        self.optimizers_schedulers = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=10)
+        return optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=10)
 
     def loss(self, labels, logits):
         return F.nll_loss(logits, labels)
 
-    def training_step(self, batch):
+    def training_step(self, batch, epoch):
 
         # forward pass
         x, y = batch
@@ -88,38 +89,39 @@ class Classifier(BaseModel):
         return output
 
     def validation_step(self, batch, epoch):
-        x, y = batch
-        x = x.view(x.size(0), -1)
+        with torch.no_grad():
+            x, y = batch
+            x = x.view(x.size(0), -1)
 
-        y_probs = self.forward(x)
-        val_loss = self.loss(y, y_probs)
+            y_probs = self.forward(x)
+            val_loss = self.loss(y, y_probs)
 
-        y_preds = y_probs.argmax(1)
-        val_acc = torch.mean((y == y_preds).float())
+            y_preds = y_probs.argmax(1)
+            val_acc = torch.mean((y == y_preds).float())
 
-        self.running_val_batches += 1
-        self.meters_val['val_loss'].update(val_loss)
-        self.meters_val['val_acc'].update(val_acc)
-        self.meters_val['val_cm'].update(y, y_probs)
+            self.running_val_batches += 1
+            self.meters_val['val_loss'].update(val_loss)
+            self.meters_val['val_acc'].update(val_acc)
+            self.meters_val['val_cm'].update(y, y_probs)
 
-        # -- This will be logged in tensorboard
-        stats = {
-            'loss': self.meters_val['val_loss'].avg,
-            'acc': self.meters_val['val_acc'].avg,
-        }
+            # -- This will be logged in tensorboard
+            stats = {
+                'loss': self.meters_val['val_loss'].avg,
+                'acc': self.meters_val['val_acc'].avg,
+            }
 
-        final_tqdm = ''
-        for key, val in stats.items():
-            final_tqdm += "{}: {:.4f} - ".format(key, val)
+            final_tqdm = ''
+            for key, val in stats.items():
+                final_tqdm += "{}: {:.4f} - ".format(key, val)
 
-        output = OrderedDict({
-            'final_tqdm': final_tqdm,
-            'stats': stats,
-        })
+            output = OrderedDict({
+                'final_tqdm': final_tqdm,
+                'stats': stats,
+            })
 
-        # TODO: not yet, but it will?
-        # can also return just a scalar instead of a dict (return loss_val)
-        return output
+            # TODO: not yet, but it will?
+            # can also return just a scalar instead of a dict (return loss_val)
+            return output
 
     def init_train_stats(self):
         self.reset_train_stats()

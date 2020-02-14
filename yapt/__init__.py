@@ -16,15 +16,17 @@ __homepage__ = 'https://gitlab.com/mciccone/yapt'
 __docs__ = "YAPT: Yet Another PyTorch Trainer."
 
 
-from .trainer.trainer import Trainer
+from .trainer.base_trainer import BaseTrainer
 from .trainer.sacred_trainer import SacredTrainer
+from .trainer.trainer import Trainer
 
 from .core.model.base import BaseModel
 from .core.confparser import configparser
 
 __all__ = [
-    'Trainer',
+    'BaseTrainer',
     'SacredTrainer',
+    'Trainer',
     'BaseModel',
     'configparser'
 ]

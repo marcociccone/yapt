@@ -10,6 +10,22 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from textwrap import wrap
 
+def is_notebook():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+        module = get_ipython().__class__.__module__
+
+        if shell == 'ZMQInteractiveShell' or module == "google.colab._shell":
+            return True   # Jupyter notebook, colab or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+
+    except NameError:
+        return False      # Probably standard Python interpreter
+
 
 def make_hash(o_dict):
     d = hashlib.sha1(json.dumps(o_dict, sort_keys=True).encode())

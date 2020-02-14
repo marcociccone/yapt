@@ -6,9 +6,7 @@ cudnn:
 dataset_name: 'mnist'
 datadir: './datasets'
 start_epoch: 0
-restart_path: ''
-use_new_dir: False
-reload_model: ''
+
 num_workers: 4
 
 only_test: False

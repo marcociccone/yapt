@@ -19,8 +19,8 @@ class BaseModel(ABC, nn.Module):
         self.reset_params()
 
         # -- Optimizers
-        self.configure_optimizers()
-        self.optimizers_schedulers = {}
+        self.optimizer = self.configure_optimizer()
+        self.scheduler_optimizer = self.configure_scheduler_optimizer()
 
     @abstractmethod
     def build_model(self) -> None:
@@ -31,10 +31,13 @@ class BaseModel(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def configure_optimizers(self) -> dict:
+    def configure_optimizer(self) -> dict:
         pass
 
-    def schedulers(self, *args, **kwargs) -> None:
+    def configure_scheduler_optimizer(self) -> dict:
+        return {}
+
+    def call_custom_schedulers(self, *args, **kwargs) -> None:
         pass
 
     def reset_params(self) -> None:

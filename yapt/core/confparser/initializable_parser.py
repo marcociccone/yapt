@@ -1,6 +1,7 @@
 import argparse
 from pprint import pprint
 
+
 class InitializableParser(argparse.ArgumentParser):
     """ A sublclass of `argparse.ArgumentParser`, allowing initialization from
         another structure.
