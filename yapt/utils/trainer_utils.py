@@ -126,6 +126,41 @@ def get_optimizer(name):
     })
     return optimizers[name.lower()]
 
+
+class DisableGradNotScriptContext:
+    def __init__(self, model):
+        self.model = model
+        self.script = self.has_scriptmodule(self.all_submodules(model))
+        self.context = None
+
+    @staticmethod
+    def all_submodules(module):
+        submod = list(module.modules())
+        for m in module.modules():
+            if m != module:
+                submod += DisableGradNotScriptContext.all_submodules(m)
+        return submod
+
+    @staticmethod
+    def has_scriptmodule(module_list):
+        for mod in module_list:
+            if isinstance(mod, torch.jit.ScriptModule):
+                return True
+        return False
+
+    def __enter__(self):
+        if not self.script:
+            self.context = torch.no_grad()
+            self.context.__enter__()
+
+    def __exit__(self, *args):
+        if not self.script:
+            self.context.__exit__(*args)
+
+# Rename class for convenience
+no_grad_ifnotscript = DisableGradNotScriptContext
+
+
 # def optimizer_parameters(self, base_lr, params_mult):
 #     """
 #     Associates network parameters with learning rates
