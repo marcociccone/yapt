@@ -7,11 +7,12 @@ class BaseModel(ABC, nn.Module):
 
     """Docstring for MyClass. """
 
-    def __init__(self, args, logger=None, **kwargs):
+    def __init__(self, args, logger=None, device='cpu', **kwargs):
         super().__init__(**kwargs)
 
         self.args = args
         self.logger = logger
+        self.device = device
         self.steps = 0
 
         # -- Model

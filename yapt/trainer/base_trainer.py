@@ -7,13 +7,12 @@ import torch
 import numpy as np
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from time import gmtime, strftime
 
+from omegaconf import OmegaConf
 from yapt.utils.trainer_utils import detach_dict, to_device
 from yapt.utils.utils import safe_mkdirs
 from yapt.core.logger.tensorboardXsafe import SummaryWriter
-from yapt.core.confparser import configparser
 
 
 class BaseTrainer(ABC):
@@ -39,12 +38,6 @@ class BaseTrainer(ABC):
 
         # -- X. here it was data loader init and model
 
-        # -- 2. Load Model
-        # TODO: here we should handle dataparallel table and distributed mode
-        model = self.set_model() if model_class is None \
-            else model_class(args, self.device)
-        self.model = model.to(self.device)
-
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
         self.restart_path = args.restart_path
@@ -66,6 +59,12 @@ class BaseTrainer(ABC):
         safe_mkdirs(self.logdir, exist_ok=True)
         self.logger = SummaryWriter(log_dir=self.logdir)
 
+        # -- 2. Load Model
+        # TODO: here we should handle dataparallel table and distributed mode
+        model = self.set_model() if model_class is None \
+            else model_class(args, logger=self.logger, device=self.device)
+        self.model = model.to(self.device)
+
     def set_defaults(self, extra_args=dict()):
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -73,26 +72,55 @@ class BaseTrainer(ABC):
         # get all the default yaml configs with glob
         dir_path = os.path.join(dir_path, 'configs', '*.yml')
 
+        # -- 0. From default yapt configuration
         self.defaults_path = {}
-        self.defaults_args = {'defaults': {}}
+        self.defaults_yapt = OmegaConf.create(dict())
         for file in glob.glob(dir_path):
             # split filename from path to create key and val
             key = os.path.splitext(os.path.split(file)[1])[0]
             self.defaults_path[key] = file
             # parse default args
-            self.defaults_args[key] = configparser._parse_yaml(file)
+            self.defaults_yapt = OmegaConf.merge(
+                self.defaults_yapt, OmegaConf.load(file))
 
-        if self.defaults_args['defaults'] is not None:
-            # defaults.yml contains general args and should not be nested
-            self.defaults_args.update(
-                deepcopy(self.defaults_args['defaults']))
-            del self.defaults_args['defaults']
+        # -- 1. From experiment default config file
+        self.default_config_args = OmegaConf.load(self.default_config)
 
-        self.extra_args = extra_args
-        self.args = configparser.parse_configuration(
-            self.default_config, dump_config=True,
-            external_defaults=self.defaults_args,
-            extra_args=extra_args)
+        # -- 2. From command line
+        self.cli_args = OmegaConf.from_cli()
+
+        # -- 3. From experiment custom config file (passed from cli)
+        self.custom_config_args = OmegaConf.create(dict())
+        if self.cli_args.custom_config is not None:
+            self.custom_config_args = OmegaConf.load(
+                self.cli_args.custom_config)
+
+        # -- 4. Extra config from Tune or any script
+        if isinstance(extra_args, dict):
+            matching = [s for s in extra_args.keys() if "." in s]
+            if len(matching) > 0:
+                print("WARNING: it seems you are using dotted notation \
+                      in a dictionary! Please use a list instead, \
+                      to modify the correct values!")
+                print(matching)
+
+            self.extra_args = OmegaConf.create(extra_args)
+        elif isinstance(extra_args, list):
+            self.extra_args = OmegaConf.from_dotlist(extra_args)
+        elif self.extra_args is None:
+            self.extra_args = OmegaConf.create(dict())
+        else:
+            raise ValueError("extra_args should be a list of \
+                             dotted strings or a dict")
+
+        # -- 5. Merge all args
+        self.args = OmegaConf.merge(
+            self.defaults_yapt,
+            self.default_config_args,
+            self.custom_config_args,
+            self.extra_args,
+            self.cli_args
+        )
 
     def print_verbose(self, message):
         if self.verbose:
@@ -119,6 +147,7 @@ class BaseTrainer(ABC):
             torch.backends.cudnn.deterministic = args.cudnn.deterministic
             self.print_verbose("cudnn.benchmark: {}".format(args.cudnn.benchmark))
             self.print_verbose("cudnn.deterministic: {}".format(args.cudnn.deterministic))
+        self.print_verbose("")
 
     def set_data_loaders(self):
         raise NotImplementedError("Implement this method to return a dict \
@@ -289,11 +318,28 @@ class BaseTrainer(ABC):
         pass
 
     def fit(self):
-        if self.args.dry_run:
-            from pprint import pprint
-            print(self.args.dumps.string_yaml)
-            pprint(self.extra_args)
+        if self.args.trainer.dry_run:
+            self.print_args()
         else:
             self._fit()
+
+    def print_args(self):
+        print("Final args:")
+        print(self.args.pretty())
+
+        print("Default YAPT args:")
+        print(self.defaults_yapt.pretty())
+
+        print("\n\nDefault config args:")
+        print(self.default_config_args.pretty())
+
+        print("\n\nCustom config args:")
+        print(self.custom_config_args.pretty())
+
+        print("\n\nExtra args:")
+        print(self.extra_args.pretty())
+
+        print("\n\ncli args:")
+        print(self.cli_args.pretty())
 
 

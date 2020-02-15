@@ -19,14 +19,14 @@ __docs__ = "YAPT: Yet Another PyTorch Trainer."
 from .trainer.base_trainer import BaseTrainer
 from .trainer.sacred_trainer import SacredTrainer
 from .trainer.trainer import Trainer
+from .trainer.tune_trainer import TuneWrapper
 
 from .core.model.base import BaseModel
-from .core.confparser import configparser
 
 __all__ = [
     'BaseTrainer',
     'SacredTrainer',
     'Trainer',
     'BaseModel',
-    'configparser'
+    'TuneWrapper',
 ]

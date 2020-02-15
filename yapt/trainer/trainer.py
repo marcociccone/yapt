@@ -4,9 +4,8 @@ import numpy as np
 from itertools import cycle, islice
 
 from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
-from yapt.utils.utils import safe_mkdirs, is_notebook
+from yapt.utils.utils import is_notebook
 
-from yapt.trainer.base_trainer import BaseTrainer
 from yapt.trainer.sacred_trainer import SacredTrainer
 
 if is_notebook():

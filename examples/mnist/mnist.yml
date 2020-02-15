@@ -1,3 +1,6 @@
+trainer:
+    tqdm:
+        disable: True
 
 cudnn:
     benchmark: False

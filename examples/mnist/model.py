@@ -38,7 +38,7 @@ class Classifier(BaseModel):
 
     def configure_optimizer(self):
         args = self.args
-        opt_params = self.args.optimizer.params.toDict()
+        opt_params = self.args.optimizer.params
         weight_decay = self.args.optimizer.regularizers.weight_decay
 
         # -- Get optimizer from args

@@ -4,30 +4,21 @@ import ray
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 
+from yapt import TuneWrapper
 from mnist_trainer import TrainerMNIST
 from model import Classifier
 
 
-class TuneMNIST(tune.Trainable):
+class TuneMNIST(TuneWrapper):
     def _setup(self, config):
+
         self.trainer = TrainerMNIST(extra_args=config, model_class=Classifier)
+        self.model = self.trainer.model
+        self.args = self.trainer.args
+        self.extra_args = self.trainer.extra_args
 
-    def _train(self):
-        # -- Training epoch
-        self.trainer.train_epoch(self.trainer.train_loader['labelled'])
-        # -- Validation
-        outputs = self.trainer.validate(
-            self.trainer.val_loader['validation'],
-            log_descr='validation',
-            logger=self.trainer.logger)
-
-        return {"mean_accuracy": outputs['stats']['acc']}
-
-    def _save(self, checkpoint_dir):
-        return self.trainer.save_checkpoint(checkpoint_dir, 'model.pt')
-
-    def _restore(self, checkpoint_path):
-        self.trainer.load_checkpoint(checkpoint_path)
+        print(self.args.pretty())
+        print(self.extra_args.pretty())
 
 
 if __name__ == "__main__":
@@ -44,29 +35,32 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     tune_config = {
-        'optimizer.name': 'sgd',
-        'optimizer.params': {
-            "lr": tune.uniform(0.001, 0.1),
-            "momentum": tune.uniform(0.1, 0.9)
+        'trainer': {'dry_run': True},
+        'optimizer': {
+            'name': 'sgd',
+            'params': {
+                'lr': tune.uniform(0.001, 0.1),
+                'momentum': tune.uniform(0.1, 0.9)
+            }
         }
     }
 
     # -- Ray initialization and scheduler
-    ray.init(address=args.ray_address, log_to_driver=False)
+    ray.init(address=args.ray_address, log_to_driver=True)
     sched = ASHAScheduler(metric="mean_accuracy")
 
     analysis = tune.run(
         TuneMNIST,
         scheduler=sched,
         stop={
-            "mean_accuracy": 0.99,
+            "acc": 0.99,
             "training_iteration": 50
         },
         resources_per_trial={
             "cpu": 3,
             "gpu": int(args.use_gpu)
         },
-        num_samples=1 if args.smoke_test else 20,
+        num_samples=1,
         checkpoint_at_end=True,
         checkpoint_freq=3,
         config=tune_config
