@@ -1,9 +1,11 @@
 import torch
 import numpy as np
+from collections import OrderedDict
 from sklearn import metrics
 from sklearn.metrics import confusion_matrix, roc_curve, auc, precision_recall_fscore_support
 
-class AverageMeter(object):
+
+class AverageMeter:
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':f'):
         self.name = name
@@ -27,15 +29,32 @@ class AverageMeter(object):
         return fmtstr.format(**self.__dict__)
 
 
-def correct(probs, labels):
-    """
-    Computes the number of correct predictions given
-    :param probas: A tensor of shape [size, num_classes] containing the predicted probabilities
-    :param labels: A tensor of shape [num_classes] containing the target labels
-    :return: a scalar representing the number of correct predictions
-    """
-    predicted_classes = torch.argmax(probs, dim=-1)
-    return torch.sum(predicted_classes == labels).float()
+class AverageMeterDict:
+    def __init__(self, names, fmt=':f'):
+        assert isinstance(names, (list, tuple)), \
+            "names should be a list, instead is a {}".format(type(names))
+
+        self.meters = OrderedDict()
+        for name in names:
+            self.meters[name] = AverageMeter(name, fmt)
+            self.name = self.meters[name]
+
+    def reset(self):
+        for key, val in self.meters.items():
+            self.meters[key].reset()
+
+    def update(self, vals):
+        assert isinstance(vals, dict), \
+            "vals should be a dict, instead is a {}".format(type(vals))
+        for key, val in vals.items():
+            self.meters[key].update(val)
+
+    def summary(self):
+        _val, _avg = OrderedDict(), OrderedDict()
+        for key, meter in self.meters.items():
+            _val[key] = meter.val
+            _avg[key] = meter.avg
+        return _val, _avg
 
 
 class ScikitMetric(object):

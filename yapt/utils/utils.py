@@ -1,14 +1,24 @@
-from __future__ import print_function
+import inspect
 import hashlib
-import torch
-import numpy as np
 import os
 import json
 import itertools
+import torch
+import numpy as np
 import matplotlib.pyplot as plt
 
 from PIL import Image
 from textwrap import wrap
+from omegaconf import ListConfig, DictConfig
+
+
+def is_list(obj):
+    return isinstance(obj, (list, tuple, ListConfig))
+
+
+def is_dict(obj):
+    return isinstance(obj, (dict, DictConfig))
+
 
 def is_notebook():
     try:
@@ -25,6 +35,34 @@ def is_notebook():
 
     except NameError:
         return False      # Probably standard Python interpreter
+
+
+def stats_to_str(stats, fmt=":.4f"):
+    assert isinstance(stats, dict), \
+        "stats should be a dict instead is a {}".format(type(stats))
+    string = ''
+    for key, val in stats.items():
+        string += ("{}: {" + fmt + "} - ").format(key, val)
+    return string
+
+
+def call_counter(func):
+    def helper(*args, **kwargs):
+        helper.calls += 1
+        return func(*args, **kwargs)
+    helper.calls = 0
+    helper.__name__ = func.__name__
+
+    return helper
+
+
+def warning_not_implemented():
+    # on first index:
+    # - 0 is for the called function
+    # - 1 is for the caller
+
+    name = inspect.stack()[1][3]
+    print("\nWARNING: {} method not implemented".format(name))
 
 
 def make_hash(o_dict):

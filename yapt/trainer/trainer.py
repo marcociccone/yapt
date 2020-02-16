@@ -4,7 +4,7 @@ import numpy as np
 from itertools import cycle, islice
 
 from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
-from yapt.utils.utils import is_notebook
+from yapt.utils.utils import is_notebook, stats_to_str
 
 from yapt.trainer.sacred_trainer import SacredTrainer
 
@@ -94,14 +94,14 @@ class Trainer(SacredTrainer):
 
         pbar = tqdm(total=self.num_batches_train,
                     desc=pbar_descr_prefix,
-                    **self.args.trainer.tqdm)
+                    **self.args.tqdm)
 
         # -- Start epoch
         for batch_idx, batch in enumerate(dataloader):
             device_batch = self.to_device(batch)
 
             # -- Model specific schedulers
-            self.model.call_custom_schedulers(
+            self.model.custom_schedulers(
                 self.epoch, logger=self.logger)
 
             # -- Execute a training step
@@ -112,13 +112,12 @@ class Trainer(SacredTrainer):
             self.collect_outputs(outputs)
 
             # -- Eventually log statistics on tensorboard
-            if self.model.steps % self.log_every == 0:
+            if self.model.global_step % self.log_every == 0:
                 self.model.log_train(
                     outputs.get('stats', dict()), self.logger)
 
-            pbar.set_description(
-                pbar_descr_prefix +
-                outputs.get('running_tqdm', ''))
+            running_tqdm = stats_to_str(outputs.get('running_tqdm', dict()))
+            pbar.set_description(pbar_descr_prefix + running_tqdm)
             pbar.update()
 
         pbar.clear()
@@ -126,10 +125,8 @@ class Trainer(SacredTrainer):
 
         # -- End Epoch
         self.model.reset_train_stats()
-
-        print(pbar_descr_prefix +
-              self.outputs_train[-1][-1].get('final_tqdm', ''))
-
+        final_tqdm = self.outputs_train[-1][-1].get('final_tqdm', dict())
+        print(pbar_descr_prefix + stats_to_str(final_tqdm))
         return self.outputs_train[-1]
 
     def _fit(self):
@@ -156,8 +153,8 @@ class Trainer(SacredTrainer):
         if self.restart_path is not None:
             self.restart_exp()
 
-        self.log_params()
-        self.json_params(self.logdir)
+        self.log_args()
+        self.dump_args(self.logdir)
 
         while self.epoch < self.max_epochs:
 
@@ -190,7 +187,6 @@ class Trainer(SacredTrainer):
             self.save_checkpoint(self.logdir, "epoch%d.ckpt" % self.epoch)
 
             # -- Validate the network against the validation set
-
             output_val = dict()
             for kk, vv in self.val_loader.items():
                 output_val[kk] = self.validate(
@@ -237,7 +233,7 @@ class Trainer(SacredTrainer):
         self.model.eval()
         self.model.init_val_stats()
 
-        pbar_descr_prefix = "    %s - " % log_descr.title()
+        pbar_descr_prefix = "\t%s - " % log_descr.title()
 
         # TODO!!
         # Disable network grad while evaluating the model
@@ -245,31 +241,32 @@ class Trainer(SacredTrainer):
         if torch.is_grad_enabled():
             print("WARNING: You should handle no_grad by yourself for now!")
 
-        pbar = tqdm(total=len(dataloader),
-                    desc=pbar_descr_prefix,
-                    **self.args.trainer.tqdm)
+        # --------------------------------------------------------------------
+
+        pbar = tqdm(total=len(dataloader), desc=pbar_descr_prefix,
+                    **self.args.tqdm)
 
         for batch_idx, batch in enumerate(dataloader):
             device_batch = self.to_device(batch)
-            outputs = self.model.validation_step(
-                device_batch, self.epoch)
+            outputs = self.model.validation_step(device_batch, self.epoch)
 
-            pbar.set_description(pbar_descr_prefix +
-                                 outputs.get('running_tqdm', ''))
+            running_tqdm = stats_to_str(outputs.get('running_tqdm', dict()))
+            pbar.set_description(pbar_descr_prefix + running_tqdm)
             pbar.update()
 
         pbar.clear()
         pbar.close()
 
+        # --------------------------------------------------------------------
+
         if logger is not None:
             self.model.log_val(
                 self.epoch, log_descr,
                 outputs.get('stats', dict()), logger)
+
         self.model.reset_val_stats()
-
-        print("    %s - %s" % (
-              log_descr.title(), outputs.get('final_tqdm', '')))
-
+        final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
+        print("\t%s - %s" % (log_descr.title(), final_tqdm))
         return outputs
 
     def only_test(self):
@@ -305,7 +302,7 @@ class Trainer(SacredTrainer):
             print("WARNING: You should handle no_grad by yourself for now!")
 
         pbar = tqdm(total=len(dataloader), desc='test',
-                    **self.args.trainer.tqdm)
+                    **self.args.tqdm)
 
         for batch_idx, batch in enumerate(dataloader):
             device_batch = self.to_device(batch)

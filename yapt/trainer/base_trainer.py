@@ -11,7 +11,7 @@ from time import gmtime, strftime
 
 from omegaconf import OmegaConf
 from yapt.utils.trainer_utils import detach_dict, to_device
-from yapt.utils.utils import safe_mkdirs
+from yapt.utils.utils import safe_mkdirs, is_dict, is_list
 from yapt.core.logger.tensorboardXsafe import SummaryWriter
 
 
@@ -21,10 +21,10 @@ class BaseTrainer(ABC):
 
     def __init__(self,
                  model_class=None,
-                 extra_args=dict(),
+                 extra_args=None,
                  init_seeds=True):
 
-        self.set_defaults(extra_args)
+        self.load_args(extra_args)
         args = self.args
 
         self.init_data = False
@@ -65,7 +65,7 @@ class BaseTrainer(ABC):
             else model_class(args, logger=self.logger, device=self.device)
         self.model = model.to(self.device)
 
-    def set_defaults(self, extra_args=dict()):
+    def load_args(self, extra_args=None):
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
         dir_path = os.path.split(dir_path)[0]
@@ -96,19 +96,21 @@ class BaseTrainer(ABC):
                 self.cli_args.custom_config)
 
         # -- 4. Extra config from Tune or any script
-        if isinstance(extra_args, dict):
+        if is_dict(extra_args):
             matching = [s for s in extra_args.keys() if "." in s]
             if len(matching) > 0:
                 print("WARNING: it seems you are using dotted notation \
                       in a dictionary! Please use a list instead, \
                       to modify the correct values!")
                 print(matching)
-
             self.extra_args = OmegaConf.create(extra_args)
-        elif isinstance(extra_args, list):
+
+        elif is_list(extra_args):
             self.extra_args = OmegaConf.from_dotlist(extra_args)
-        elif self.extra_args is None:
+
+        elif extra_args is None:
             self.extra_args = OmegaConf.create(dict())
+
         else:
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
@@ -121,6 +123,25 @@ class BaseTrainer(ABC):
             self.extra_args,
             self.cli_args
         )
+
+    def print_args(self):
+        print("Final args:")
+        print(self.args.pretty())
+
+        print("Default YAPT args:")
+        print(self.defaults_yapt.pretty())
+
+        print("\n\nDefault config args:")
+        print(self.default_config_args.pretty())
+
+        print("\n\nCustom config args:")
+        print(self.custom_config_args.pretty())
+
+        print("\n\nExtra args:")
+        print(self.extra_args.pretty())
+
+        print("\n\ncli args:")
+        print(self.cli_args.pretty())
 
     def print_verbose(self, message):
         if self.verbose:
@@ -157,18 +178,23 @@ class BaseTrainer(ABC):
         raise NotImplementedError("Implement this method to return your model \
                                    or pass it to the constructor")
 
-    def log_params(self):
+    def log_args(self):
         name_str = os.path.basename(sys.argv[0])
         args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self.args).items())])[:-2]
         self.logger.add_text("Script arguments", name_str + " -> " + args_str)
 
-    def json_params(self, savedir):
+    def dump_args(self, savedir):
+        def path(name):
+            return os.path.join(savedir, name)
         try:
-            dict_params = vars(self.args)
-            json_path = os.path.join(savedir, "args.json")
+            self.args.save(path('args.yml'))
+            # -- Just to be sure, but not really useful dumps
+            self.defaults_yapt.save(path('defaults_yapt.yml'))
+            self.cli_args.save(path('cli_args.yml'))
+            self.extra_args.save(path('extra_args.yml'))
+            self.default_config_args.save(path('default_config_args.yml'))
+            self.custom_config_args.save(path('custom_config_args.yml'))
 
-            with open(json_path, 'w') as fp:
-                json.dump(dict_params, fp)
         except Exception as e:
             print("An error occurred while saving parameters into JSON:")
             print(e)
@@ -229,7 +255,7 @@ class BaseTrainer(ABC):
             }
 
             # -- there might be more than one optimizer
-            if isinstance(self.model.optimizer, dict):
+            if is_dict(self.model.optimizer):
                 optimizer_state_dict = {}
                 for key, opt in self.model.optimizer.items():
                     optimizer_state_dict.update({key: opt.state_dict()})
@@ -257,7 +283,7 @@ class BaseTrainer(ABC):
         self.best_epoch_score = checkpoint['best_epoch_score']
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
-        if isinstance(self.model.optimizer, dict):
+        if is_dict(self.model.optimizer):
             for key in self.model.optimizers.keys():
                 self.model.optimizers.load_state_dict(
                     checkpoint['optimizer_state_dict'][key])
@@ -284,7 +310,7 @@ class BaseTrainer(ABC):
         if isinstance(schedulers, torch.optim.lr_scheduler._LRScheduler):
             schedulers.step()
 
-        elif isinstance(schedulers, dict):
+        elif is_dict(schedulers):
             for _, scheduler in schedulers.items():
                 scheduler.step()
         else:
@@ -301,7 +327,7 @@ class BaseTrainer(ABC):
             current_lr = optimizers.param_groups[0]['lr']
             self.logger.add_scalar('optim/lr', current_lr, self.epoch)
 
-        elif isinstance(optimizers, dict):
+        elif is_dict(optimizers):
             for key, opt in optimizers.items():
                 current_lr = opt.param_groups[0]['lr']
                 self.logger.add_scalar(
@@ -322,24 +348,3 @@ class BaseTrainer(ABC):
             self.print_args()
         else:
             self._fit()
-
-    def print_args(self):
-        print("Final args:")
-        print(self.args.pretty())
-
-        print("Default YAPT args:")
-        print(self.defaults_yapt.pretty())
-
-        print("\n\nDefault config args:")
-        print(self.default_config_args.pretty())
-
-        print("\n\nCustom config args:")
-        print(self.custom_config_args.pretty())
-
-        print("\n\nExtra args:")
-        print(self.extra_args.pretty())
-
-        print("\n\ncli args:")
-        print(self.cli_args.pretty())
-
-

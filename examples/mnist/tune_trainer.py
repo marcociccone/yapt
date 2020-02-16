@@ -35,7 +35,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     tune_config = {
-        'trainer': {'dry_run': True},
+        'trainer': {'dry_run': False},
         'optimizer': {
             'name': 'sgd',
             'params': {
@@ -60,7 +60,7 @@ if __name__ == "__main__":
             "cpu": 3,
             "gpu": int(args.use_gpu)
         },
-        num_samples=1,
+        num_samples=10,
         checkpoint_at_end=True,
         checkpoint_freq=3,
         config=tune_config

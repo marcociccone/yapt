@@ -22,10 +22,14 @@ class TuneWrapper(tune.Trainable):
         self.trainer.train_epoch(self.trainer.train_loader['labelled'])
         self.epoch = self.trainer.epoch
 
+        val_set = args.early_stopping.dataset
+        if val_set is None:
+            val_set = 'validation'
+
         # -- Validation
         outputs = self.trainer.validate(
-            self.trainer.val_loader['validation'],
-            log_descr='validation',
+            self.trainer.val_loader[val_set],
+            log_descr=val_set,
             logger=self.trainer.logger)
 
         return outputs['stats']
