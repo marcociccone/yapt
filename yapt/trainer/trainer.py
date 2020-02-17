@@ -79,8 +79,7 @@ class Trainer(SacredTrainer):
         self._train_loader = data_loaders['train']
         self._val_loader = data_loaders.get('val', None)
         self._test_loader = data_loaders.get('test', None)
-
-        self.semi_supervised = self.args.general.semi_supervised
+        self.semi_supervised = self.args.semi_supervised
 
         if self.semi_supervised:
             assert isinstance(self._train_loader, dict), \
@@ -439,7 +438,7 @@ class Trainer(SacredTrainer):
             out = self._model.test_step(device_batch)
 
             # -- Append every batch
-            # TODO: make it general and merrge with collect --> collate
+            # TODO: make it general creating a collate function
             for key, val in out.items():
                 val = val.cpu()
                 if to_numpy:

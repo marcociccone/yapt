@@ -13,6 +13,13 @@ from yapt.utils.utils import safe_mkdirs, is_dict, is_list
 from yapt.core.logger.tensorboardXsafe import SummaryWriter
 
 
+def get_maybe_missing(args, key, default=None):
+    if OmegaConf.is_missing(args, key):
+        return default
+    else:
+        return args.get(key)
+
+
 class BaseTrainer(ABC):
 
     default_config = None
@@ -82,11 +89,9 @@ class BaseTrainer(ABC):
         self.load_args(extra_args)
         args = self._args
 
-        self.init_data = False
-
         self._global_step = 0
-        self._verbose = args.general.verbose
-        self._use_cuda = args.general.cuda and torch.cuda.is_available()
+        self._verbose = args.verbose
+        self._use_cuda = args.cuda and torch.cuda.is_available()
         self._device = torch.device("cuda" if self._use_cuda else "cpu")
         self.print_verbose("Device: {}".format(self._device))
 
@@ -97,7 +102,7 @@ class BaseTrainer(ABC):
 
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
-        self._restart_path = args.restart_path
+        self._restart_path = get_maybe_missing(args, 'restart_path')
         self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
         if self._restart_path is not None and not self._args.use_new_dir:
             if os.path.isfile(self._restart_path):
@@ -181,14 +186,23 @@ class BaseTrainer(ABC):
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
 
-        # -- 5. Merge all args
+        # -- 5. Merge defautl args
         self._args = OmegaConf.merge(
             self._defaults_yapt,
-            self._default_config_args,
+            self._default_config_args)
+        # -- 6. make args structured: it fails if accessing a missing key
+        OmegaConf.set_struct(self._args, True)
+        # -- 7. override custom args, ONLY IF THEY EXISTS
+        self._args = OmegaConf.merge(
+            self._args,
             self._custom_config_args,
-            self._extra_args,
-            self._cli_args
-        )
+            self._extra_args)
+
+        # !!NOTE!! WORKAROUND because of Tune comman line args
+        OmegaConf.set_struct(self._args, False)
+        self._args = OmegaConf.merge(
+            self._args, self._cli_args)
+        OmegaConf.set_struct(self._args, True)
 
     def print_args(self):
         print("Final args:")
@@ -220,7 +234,7 @@ class BaseTrainer(ABC):
             return
 
         args = self._args
-        self._seed = args.general.seed
+        self._seed = args.seed
 
         if self._seed != -1:
             torch.manual_seed(self._seed)
@@ -303,7 +317,7 @@ class BaseTrainer(ABC):
         pass
 
     def fit(self):
-        if self._args.general.dry_run:
+        if self._args.dry_run:
             self.print_args()
         else:
             self._fit()

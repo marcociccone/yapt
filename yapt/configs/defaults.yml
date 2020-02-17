@@ -1,10 +1,9 @@
-general:
-    dry_run: False
-    dataset_name: ''
-    semi_supervised: False
-    cuda: True
-    seed: -1
-    verbose: True
+cuda: True
+dry_run: False
+dataset_name: ''
+semi_supervised: False
+seed: -1
+verbose: True
 
 loggers:
     logdir: './logs'

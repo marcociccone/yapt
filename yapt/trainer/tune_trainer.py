@@ -25,8 +25,8 @@ class TuneWrapper(tune.Trainable):
 
     def _train(self):
         args = self.args
-        if args.general.dry_run:
-            print(args.general.extra_args.pretty())
+        if args.dry_run:
+            print(args.extra_args.pretty())
             self.stop()
             return {}
 
