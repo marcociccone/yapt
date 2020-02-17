@@ -4,21 +4,19 @@ import ray
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 
-from yapt import TuneWrapper
+from yapt import TuneWrapper, EarlyStoppingRule
 from mnist_trainer import TrainerMNIST
 from model import Classifier
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 
 class TuneMNIST(TuneWrapper):
+
     def _setup(self, config):
-
         self.trainer = TrainerMNIST(extra_args=config, model_class=Classifier)
-        self.model = self.trainer.model
-        self.args = self.trainer.args
-        self.extra_args = self.trainer.extra_args
-
-        print(self.args.pretty())
-        print(self.extra_args.pretty())
+        super()._setup(config)
 
 
 if __name__ == "__main__":
@@ -35,7 +33,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     tune_config = {
-        'trainer': {'dry_run': False},
+        'general': {'dry_run': False},
+        'tqdm': {'disable': True},
         'optimizer': {
             'name': 'sgd',
             'params': {
@@ -47,24 +46,25 @@ if __name__ == "__main__":
 
     # -- Ray initialization and scheduler
     ray.init(address=args.ray_address, log_to_driver=True)
-    sched = ASHAScheduler(metric="mean_accuracy")
+    # sched = ASHAScheduler(metric="acc")
+    sched = EarlyStoppingRule(metric="acc", patience=10)
 
     analysis = tune.run(
         TuneMNIST,
         scheduler=sched,
         stop={
-            "acc": 0.99,
-            "training_iteration": 50
+            "training_iteration": 150
         },
         resources_per_trial={
             "cpu": 3,
-            "gpu": int(args.use_gpu)
+            "gpu": 0.1
         },
         num_samples=10,
         checkpoint_at_end=True,
-        checkpoint_freq=3,
-        config=tune_config
+        checkpoint_freq=10,
+        config=tune_config,
+        local_dir='./logs'
     )
 
-    print("Best config is:", analysis.get_best_config(metric="mean_accuracy"))
+    print("Best config is:", analysis.get_best_config(metric="acc"))
 

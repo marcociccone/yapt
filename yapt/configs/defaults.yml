@@ -1,4 +1,4 @@
-trainer:
+general:
     dry_run: False
     dataset_name: ''
     semi_supervised: False

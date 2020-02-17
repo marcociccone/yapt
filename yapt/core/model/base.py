@@ -15,10 +15,10 @@ class BaseModel(ABC, nn.Module):
         self.logger = logger
         self.device = device
 
-        self.epoch = 0
-        self.global_step = 0
-        self.train_step = 0
-        self.val_step = 0
+        self._epoch = 0
+        self._global_step = 0
+        self._train_step = 0
+        self._val_step = 0
 
         # -- Model
         self.build_model(**kwargs)
@@ -27,6 +27,22 @@ class BaseModel(ABC, nn.Module):
         # -- Optimizers
         self.optimizer = self.configure_optimizer()
         self.scheduler_optimizer = self.configure_scheduler_optimizer()
+
+    @property
+    def epoch(self):
+        return self._epoch
+
+    @property
+    def global_step(self):
+        return self._global_step
+
+    @property
+    def train_step(self):
+        return self._train_step
+
+    @property
+    def val_step(self):
+        return self._val_step
 
     def build_model(self):
         self._build_model()
@@ -44,15 +60,15 @@ class BaseModel(ABC, nn.Module):
         self._reset_params()
 
     def training_step(self, batch, epoch, *args, **kwargs) -> dict:
-        self.epoch = epoch
+        self._epoch = epoch
         outputs = self._training_step(batch, epoch, *args, **kwargs)
-        self.train_step += 1
-        self.global_step += 1
+        self._train_step += 1
+        self._global_step += 1
         return outputs
 
     def validation_step(self, *args, **kwargs) -> dict:
         outputs = self._validation_step(*args, **kwargs)
-        self.val_step += 1
+        self._val_step += 1
         return outputs
 
     def test_step(self, *args, **kwargs) -> dict:
@@ -66,18 +82,18 @@ class BaseModel(ABC, nn.Module):
         self.reset_train_stats()
 
     def reset_train_stats(self) -> None:
-        self.train_step = 0
+        self._train_step = 0
         self._reset_train_stats()
 
     def reset_val_stats(self) -> None:
-        self.val_step = 0
+        self._val_step = 0
         self._reset_val_stats()
 
     def log_train(self, stats: dict, logger: SummaryWriter) -> None:
         # Logging on Tensorboard
         for key, val in stats.items():
             logger.add_scalar(
-                "train/{}".format(key), val, global_step=self.global_step)
+                "train/{}".format(key), val, global_step=self._global_step)
         # self._log_train()
 
     def log_val(self, epoch: int, descr: str, stats: dict, logger: SummaryWriter) -> None:

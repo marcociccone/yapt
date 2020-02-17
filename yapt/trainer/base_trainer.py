@@ -1,8 +1,6 @@
 import os
-import re
 import sys
 import glob
-import json
 import torch
 import numpy as np
 
@@ -19,19 +17,78 @@ class BaseTrainer(ABC):
 
     default_config = None
 
+    @property
+    def seed(self):
+        return self._seed
+
+    @property
+    def model(self):
+        return self._model
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def logger(self):
+        return self._logger
+
+    @property
+    def logdir(self):
+        return self._logdir
+
+    @property
+    def timestring(self):
+        return self._timestring
+
+    @property
+    def use_cuda(self):
+        return self._use_cuda
+
+    @property
+    def global_step(self):
+        return self._global_step
+
+    @property
+    def args(self):
+        return self._args
+
+    @property
+    def defaults_yapt(self):
+        return self._defaults_yapt
+
+    @property
+    def default_config_args(self):
+        return self._default_config_args
+
+    @property
+    def custom_config_args(self):
+        return self._custom_config_args
+
+    @property
+    def extra_args(self):
+        return self._extra_args
+
+    @property
+    def cli_args(self):
+        return self._cli_args
+
     def __init__(self,
                  model_class=None,
                  extra_args=None,
+                 external_logdir=None,
                  init_seeds=True):
 
         self.load_args(extra_args)
-        args = self.args
+        args = self._args
 
         self.init_data = False
-        self.verbose = args.trainer.verbose
-        self.use_cuda = args.trainer.cuda and torch.cuda.is_available()
-        self.device = torch.device("cuda" if self.use_cuda else "cpu")
-        self.print_verbose("Device: {}".format(self.device))
+
+        self._global_step = 0
+        self._verbose = args.general.verbose
+        self._use_cuda = args.general.cuda and torch.cuda.is_available()
+        self._device = torch.device("cuda" if self._use_cuda else "cpu")
+        self.print_verbose("Device: {}".format(self._device))
 
         # -- 0. Init random seed
         self.init_seeds(init_seeds)
@@ -40,30 +97,39 @@ class BaseTrainer(ABC):
 
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
-        self.restart_path = args.restart_path
-        self.timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
-        if self.restart_path is not None and not self.args.use_new_dir:
-            if os.path.isfile(self.restart_path):
-                self.logdir = os.path.dirname(self.restart_path)
-            elif os.path.isdir(self.restart_path):
-                self.logdir = self.restart_path
+        self._restart_path = args.restart_path
+        self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
+        if self._restart_path is not None and not self._args.use_new_dir:
+            if os.path.isfile(self._restart_path):
+                self._logdir = os.path.dirname(self._restart_path)
+            elif os.path.isdir(self._restart_path):
+                self._logdir = self._restart_path
             else:
                 raise NotImplementedError(
                     "Restart Path %s is not a file nor a dir" %
-                    self.restart_path)
+                    self._restart_path)
         else:
-            self.logdir = os.path.join(
+            self._logdir = os.path.join(
                 args.loggers.logdir, args.dataset_name.lower(),
-                self.timestring + "_%s" % args.exp_name)
+                self._timestring + "_%s" % args.exp_name)
 
-        safe_mkdirs(self.logdir, exist_ok=True)
-        self.logger = SummaryWriter(log_dir=self.logdir)
+        self._logger = self.create_logger(external_logdir)
+        self.dump_args(self._logdir)
 
         # -- 2. Load Model
         # TODO: here we should handle dataparallel table and distributed mode
         model = self.set_model() if model_class is None \
-            else model_class(args, logger=self.logger, device=self.device)
-        self.model = model.to(self.device)
+            else model_class(args, logger=self._logger, device=self._device)
+        self._model = model.to(self._device)
+
+    def create_logger(self, external_logdir=None):
+        if external_logdir is not None:
+            self._logdir = external_logdir
+            self.print_verbose("WARNING: external logdir {}".format(
+                external_logdir))
+
+        safe_mkdirs(self._logdir, exist_ok=True)
+        return SummaryWriter(log_dir=self._logdir)
 
     def load_args(self, extra_args=None):
         # retrieve module path
@@ -73,27 +139,27 @@ class BaseTrainer(ABC):
         dir_path = os.path.join(dir_path, 'configs', '*.yml')
 
         # -- 0. From default yapt configuration
-        self.defaults_path = {}
-        self.defaults_yapt = OmegaConf.create(dict())
+        self._defaults_path = {}
+        self._defaults_yapt = OmegaConf.create(dict())
         for file in glob.glob(dir_path):
             # split filename from path to create key and val
             key = os.path.splitext(os.path.split(file)[1])[0]
-            self.defaults_path[key] = file
+            self._defaults_path[key] = file
             # parse default args
-            self.defaults_yapt = OmegaConf.merge(
-                self.defaults_yapt, OmegaConf.load(file))
+            self._defaults_yapt = OmegaConf.merge(
+                self._defaults_yapt, OmegaConf.load(file))
 
         # -- 1. From experiment default config file
-        self.default_config_args = OmegaConf.load(self.default_config)
+        self._default_config_args = OmegaConf.load(self.default_config)
 
         # -- 2. From command line
-        self.cli_args = OmegaConf.from_cli()
+        self._cli_args = OmegaConf.from_cli()
 
         # -- 3. From experiment custom config file (passed from cli)
-        self.custom_config_args = OmegaConf.create(dict())
-        if self.cli_args.custom_config is not None:
-            self.custom_config_args = OmegaConf.load(
-                self.cli_args.custom_config)
+        self._custom_config_args = OmegaConf.create(dict())
+        if self._cli_args.custom_config is not None:
+            self._custom_config_args = OmegaConf.load(
+                self._cli_args.custom_config)
 
         # -- 4. Extra config from Tune or any script
         if is_dict(extra_args):
@@ -103,48 +169,48 @@ class BaseTrainer(ABC):
                       in a dictionary! Please use a list instead, \
                       to modify the correct values!")
                 print(matching)
-            self.extra_args = OmegaConf.create(extra_args)
+            self._extra_args = OmegaConf.create(extra_args)
 
         elif is_list(extra_args):
-            self.extra_args = OmegaConf.from_dotlist(extra_args)
+            self._extra_args = OmegaConf.from_dotlist(extra_args)
 
         elif extra_args is None:
-            self.extra_args = OmegaConf.create(dict())
+            self._extra_args = OmegaConf.create(dict())
 
         else:
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
 
         # -- 5. Merge all args
-        self.args = OmegaConf.merge(
-            self.defaults_yapt,
-            self.default_config_args,
-            self.custom_config_args,
-            self.extra_args,
-            self.cli_args
+        self._args = OmegaConf.merge(
+            self._defaults_yapt,
+            self._default_config_args,
+            self._custom_config_args,
+            self._extra_args,
+            self._cli_args
         )
 
     def print_args(self):
         print("Final args:")
-        print(self.args.pretty())
+        print(self._args.pretty())
 
         print("Default YAPT args:")
-        print(self.defaults_yapt.pretty())
+        print(self._defaults_yapt.pretty())
 
         print("\n\nDefault config args:")
-        print(self.default_config_args.pretty())
+        print(self._default_config_args.pretty())
 
         print("\n\nCustom config args:")
-        print(self.custom_config_args.pretty())
+        print(self._custom_config_args.pretty())
 
         print("\n\nExtra args:")
-        print(self.extra_args.pretty())
+        print(self._extra_args.pretty())
 
         print("\n\ncli args:")
-        print(self.cli_args.pretty())
+        print(self._cli_args.pretty())
 
     def print_verbose(self, message):
-        if self.verbose:
+        if self._verbose:
             print(message)
 
     def init_seeds(self, init_seeds):
@@ -153,17 +219,17 @@ class BaseTrainer(ABC):
         if not init_seeds:
             return
 
-        args = self.args
-        self.seed = args.trainer.seed
+        args = self._args
+        self._seed = args.general.seed
 
-        if self.seed != -1:
-            torch.manual_seed(self.seed)
-            torch.cuda.manual_seed(self.seed)
-            np.random.seed(self.seed)  # Numpy module.
+        if self._seed != -1:
+            torch.manual_seed(self._seed)
+            torch.cuda.manual_seed(self._seed)
+            np.random.seed(self._seed)  # Numpy module.
             # random.seed(self.seed)  # Python random module.
-            self.print_verbose("Random seed: {}".format(self.seed))
+            self.print_verbose("Random seed: {}".format(self._seed))
 
-        if self.use_cuda and args.cudnn is not None:
+        if self._use_cuda and args.cudnn is not None:
             torch.backends.cudnn.benchmark = args.cudnn.benchmark
             torch.backends.cudnn.deterministic = args.cudnn.deterministic
             self.print_verbose("cudnn.benchmark: {}".format(args.cudnn.benchmark))
@@ -180,119 +246,33 @@ class BaseTrainer(ABC):
 
     def log_args(self):
         name_str = os.path.basename(sys.argv[0])
-        args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self.args).items())])[:-2]
-        self.logger.add_text("Script arguments", name_str + " -> " + args_str)
+        args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self._args).items())])[:-2]
+        self._logger.add_text("Script arguments", name_str + " -> " + args_str)
 
     def dump_args(self, savedir):
         def path(name):
             return os.path.join(savedir, name)
         try:
-            self.args.save(path('args.yml'))
+            self._args.save(path('args.yml'))
             # -- Just to be sure, but not really useful dumps
-            self.defaults_yapt.save(path('defaults_yapt.yml'))
-            self.cli_args.save(path('cli_args.yml'))
-            self.extra_args.save(path('extra_args.yml'))
-            self.default_config_args.save(path('default_config_args.yml'))
-            self.custom_config_args.save(path('custom_config_args.yml'))
+            self._defaults_yapt.save(path('defaults_yapt.yml'))
+            self._cli_args.save(path('cli_args.yml'))
+            self._extra_args.save(path('extra_args.yml'))
+            self._default_config_args.save(path('default_config_args.yml'))
+            self._custom_config_args.save(path('custom_config_args.yml'))
 
         except Exception as e:
-            print("An error occurred while saving parameters into JSON:")
-            print(e)
-
-    def json_results(self, savedir, test_score):
-        try:
-            json_path = os.path.join(savedir, "results.json")
-            results = {'seen': self.seen,
-                       'epoch': self.epoch,
-                       'best_epoch': self.best_epoch,
-                       'beaten_epochs': self.beaten_epochs,
-                       'best_epoch_score': self.best_epoch_score,
-                       'test_score': test_score}
-
-            with open(json_path, 'w') as fp:
-                json.dump(results, fp)
-
-        except Exception as e:
-            print("An error occurred while saving results into JSON:")
+            print("An error occurred while args dump:")
             print(e)
 
     def log_gradients(self, logger, global_step):
-
-        for name, param in self.model.named_parameters():
+        for name, param in self._model.named_parameters():
             if param.requires_grad and param.grad is not None:
-                logger.add_scalar("gradients/"+name, param.grad.norm(2).item(),
+                logger.add_scalar("gradients/" + name, param.grad.norm(2).item(),
                                   global_step=global_step)
 
-    def restart_exp(self):
-        # check if restart_path is a specific checkpoint
-        if os.path.isfile(self.restart_path):
-            print("Reload checkpoint: %s" % self.restart_path)
-            self.load_checkpoint("", self.restart_path)
-        # else restore last one
-        else:
-            regex = re.compile(r'.*epoch(\d+)\.ckpt')
-            checkpoints = glob.glob(os.path.join(self.restart_path, "*.ckpt"))
-            # Sort checkpoints
-            checkpoints = sorted(
-                checkpoints, key=lambda f: int(regex.findall(f)[0]))
-            last_checkpoint = checkpoints[-1]
-            print("Reload checkpoint: %s" % last_checkpoint)
-            self.load_checkpoint("", last_checkpoint)
-
-    def save_checkpoint(self, path, filename):
-        safe_mkdirs(path, exist_ok=True)
-
-        try:
-            filename = os.path.join(path, filename)
-
-            current_state_dict = {
-                'seen': self.seen,
-                'epoch': self.epoch,
-                'best_epoch': self.best_epoch,
-                'beaten_epochs': self.beaten_epochs,
-                'best_epoch_score': self.best_epoch_score,
-                'model_state_dict': self.model.state_dict(),
-            }
-
-            # -- there might be more than one optimizer
-            if is_dict(self.model.optimizer):
-                optimizer_state_dict = {}
-                for key, opt in self.model.optimizer.items():
-                    optimizer_state_dict.update({key: opt.state_dict()})
-            else:
-                optimizer_state_dict = self.model.optimizer.state_dict()
-
-            current_state_dict.update(
-                {'optimizer_state_dict': optimizer_state_dict})
-
-            torch.save(current_state_dict, filename)
-
-        except Exception as e:
-            print("An error occurred while saving the checkpoint:")
-            print(e)
-        return filename
-
-    def load_checkpoint(self, path, filename):
-        ckpt_path = os.path.join(path, filename)
-
-        checkpoint = torch.load(ckpt_path)
-        self.seen = checkpoint['seen']
-        self.epoch = checkpoint['epoch']
-        self.best_epoch = checkpoint['best_epoch']
-        self.beaten_epochs = checkpoint['beaten_epochs']
-        self.best_epoch_score = checkpoint['best_epoch_score']
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-
-        if is_dict(self.model.optimizer):
-            for key in self.model.optimizers.keys():
-                self.model.optimizers.load_state_dict(
-                    checkpoint['optimizer_state_dict'][key])
-        else:
-            self.model.optimizer.load_state_dict(
-                checkpoint['optimizer_state_dict'])
-
     def to_device(self, tensor_list):
-        return to_device(tensor_list, self.device)
+        return to_device(tensor_list, self._device)
 
     def collect_outputs(self, outputs):
         """
@@ -305,7 +285,7 @@ class BaseTrainer(ABC):
 
     def call_schedulers_optimizers(self):
 
-        schedulers = self.model.scheduler_optimizer
+        schedulers = self._model.scheduler_optimizer
 
         if isinstance(schedulers, torch.optim.lr_scheduler._LRScheduler):
             schedulers.step()
@@ -318,33 +298,12 @@ class BaseTrainer(ABC):
                 "optimizers_schedulers should be a \
                 dict or a torch.optim.lr_scheduler._LRScheduler object")
 
-    def log_each_epoch(self):
-        # -- Log learning rates
-
-        # TODO: maybe a good idea to have a self.optimizers = self.model.optimizer ?
-        optimizers = self.model.optimizer
-        if isinstance(optimizers, torch.optim.Optimizer):
-            current_lr = optimizers.param_groups[0]['lr']
-            self.logger.add_scalar('optim/lr', current_lr, self.epoch)
-
-        elif is_dict(optimizers):
-            for key, opt in optimizers.items():
-                current_lr = opt.param_groups[0]['lr']
-                self.logger.add_scalar(
-                    'optim/lr_{}'.format(key), current_lr, self.epoch)
-        else:
-            raise ValueError(
-                "optimizer should be a dict or a \
-                torch.optim.Optimizer object")
-
-        # -- TODO: add anything else to be logged here
-
     @abstractmethod
     def _fit(self):
         pass
 
     def fit(self):
-        if self.args.trainer.dry_run:
+        if self._args.general.dry_run:
             self.print_args()
         else:
             self._fit()
