@@ -18,8 +18,11 @@
 - https://github.com/ray-project/ray/blob/master/python/ray/experimental/sgd/pytorch/examples/train_example.py
 
 ## Logger
-- [] should we use Tune logger? is it feasible? At least save in the same folder!
+- [x] should we use Tune logger? is it feasible? At least save in the same folder!
+    - Yes, but the metrics you want to log should be returned in _train as result dictionary.
 - [] add time statistics for each method as in ray sgd pytorch runner
+- [] choose to plot gradients and norms
+- [] integrate https://discuss.pytorch.org/t/check-gradient-flow-in-network/15063/6
 
 ## Parser
 - [] make sure that type does not change in args and also handle missing params
@@ -32,3 +35,18 @@
 ## DVAE
 - [] run exploration parameters on cmnist
 - [] check if I can run experiment with  mutual information (MINE)
+-
+-
+## Tune
+- [] check possible tune args from cli, otherwise it breaks
+-(pid=175) --config-list: null
+(pid=175) --node-ip-address: 172.17.0.18
+(pid=175) --node-manager-port: 42041
+(pid=175) --object-store-name: /tmp/ray/session_2020-02-17_23-18-57_895840_1/sockets/plasma_store
+(pid=175) --raylet-name: /tmp/ray/session_2020-02-17_23-18-57_895840_1/sockets/raylet
+(pid=175) --redis-address: 172.17.0.18:40064
+(pid=175) --redis-password: null
+(pid=175) --temp-dir: /tmp/ray
+(pid=175) --use-pickle: null
+(pid=175) '5241590000000000': null
+

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from textwrap import wrap
 from omegaconf import ListConfig, DictConfig
+from collections import MutableMapping
 
 
 def is_list(obj):
@@ -63,6 +64,17 @@ def warning_not_implemented():
 
     name = inspect.stack()[1][3]
     print("\nWARNING: {} method not implemented".format(name))
+
+
+def flatten_dict(d, parent_key='', sep='.'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, MutableMapping):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 
 def make_hash(o_dict):

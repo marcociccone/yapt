@@ -14,9 +14,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 class TuneMNIST(TuneWrapper):
 
-    def _setup(self, config):
-        self.trainer = TrainerMNIST(extra_args=config, model_class=Classifier)
-        super()._setup(config)
+    def _build_runner(self, config):
+        return TrainerMNIST(extra_args=config, model_class=Classifier)
 
 
 if __name__ == "__main__":
@@ -33,7 +32,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     tune_config = {
-        'general': {'dry_run': False},
+        'dry_run': False,
         'tqdm': {'disable': True},
         'optimizer': {
             'name': 'sgd',
@@ -53,17 +52,17 @@ if __name__ == "__main__":
         TuneMNIST,
         scheduler=sched,
         stop={
-            "training_iteration": 150
+            "training_iteration": 2
         },
         resources_per_trial={
             "cpu": 3,
-            "gpu": 0.1
+            "gpu": 1
         },
-        num_samples=10,
+        num_samples=2,
         checkpoint_at_end=True,
         checkpoint_freq=10,
         config=tune_config,
-        local_dir='./logs'
+        local_dir='./logs/new'
     )
 
     print("Best config is:", analysis.get_best_config(metric="acc"))

@@ -4,8 +4,10 @@ import glob
 import torch
 import numpy as np
 
+from functools import reduce
 from abc import ABC, abstractmethod
 from time import gmtime, strftime
+from copy import deepcopy
 
 from omegaconf import OmegaConf
 from yapt.utils.trainer_utils import detach_dict, to_device
@@ -18,6 +20,10 @@ def get_maybe_missing(args, key, default=None):
         return default
     else:
         return args.get(key)
+
+
+def recursive_get(_dict, *keys):
+    return reduce(lambda c, k: c.get(k, {}), keys, _dict)
 
 
 class BaseTrainer(ABC):
@@ -136,6 +142,26 @@ class BaseTrainer(ABC):
         safe_mkdirs(self._logdir, exist_ok=True)
         return SummaryWriter(log_dir=self._logdir)
 
+    # def get_modifiable_args(self, keys=[]):
+    #     # This works only on the first level
+    #     dict_opt_custom = dict()
+    #     dict_opt_extra = dict()
+    #     for key in keys:
+    #         # -- Save args for later
+    #         if not isinstance(key, (list, tuple)):
+    #             key = [key]
+    #         dict_opt_custom[key]= deepcopy(recursive_get(self._custom_config_args, key))
+    #         dict_opt_extra[key] = deepcopy(recursive_get(self._extra_args, key))
+    #         # -- Remove from dictionary
+    #         if dict_opt_custom is not None:
+    #             dc = recursive_get(self._custom_config_args, key)
+    #             del dc
+    #         if dict_opt_extra is not None:
+    #             dc = recursive_get(self._extra_args, key)
+    #             del dc
+
+    #     return dict_opt_custom, dict_opt_extra
+
     def load_args(self, extra_args=None):
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -186,17 +212,40 @@ class BaseTrainer(ABC):
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
 
-        # -- 5. Merge defautl args
+        # -- 5. Merge default args
         self._args = OmegaConf.merge(
             self._defaults_yapt,
             self._default_config_args)
+
         # -- 6. make args structured: it fails if accessing a missing key
         OmegaConf.set_struct(self._args, True)
+
+        # -- Save optimizer args for later
+        dict_opt_custom = deepcopy(self._custom_config_args.optimizer)
+        dict_opt_extra = deepcopy(self._extra_args.optimizer)
+        if dict_opt_custom is not None:
+            del self._custom_config_args['optimizer']
+        if dict_opt_extra is not None:
+            del self._extra_args['optimizer']
+
         # -- 7. override custom args, ONLY IF THEY EXISTS
         self._args = OmegaConf.merge(
             self._args,
             self._custom_config_args,
             self._extra_args)
+
+        # !!NOTE!! Optimizer could drastically change
+        OmegaConf.set_struct(self._args, False)
+        if dict_opt_custom is not None:
+            self._args = OmegaConf.merge(
+                self._args,
+                OmegaConf.create({'optimizer': dict_opt_custom}))
+
+        if dict_opt_extra is not None:
+            self._args = OmegaConf.merge(
+                self._args,
+                OmegaConf.create({'optimizer': dict_opt_extra}))
+        OmegaConf.set_struct(self._args, True)
 
         # !!NOTE!! WORKAROUND because of Tune comman line args
         OmegaConf.set_struct(self._args, False)

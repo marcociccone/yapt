@@ -3,9 +3,12 @@ import logging
 import collections
 import numpy as np
 
-from ray.tune.trial import Trial
 from ray.tune.schedulers.trial_scheduler import FIFOScheduler, TrialScheduler
 
+from yapt import Trainer
+from yapt.utils.utils import flatten_dict
+from yapt.core.model.base import BaseModel
+from collections import OrderedDict
 from abc import abstractmethod
 from ray import tune
 
@@ -15,11 +18,23 @@ logger = logging.getLogger(__name__)
 class TuneWrapper(tune.Trainable):
 
     @abstractmethod
+    def _build_runner(self, extra_args, logdir):
+        """
+            Template: replace with your trainer and model
+        """
+        return Trainer(extra_args=extra_args,
+                       external_logdir=logdir,
+                       model_class=BaseModel)
+
     def _setup(self, config):
-        self.args = self.trainer.args
-        self.model = self.trainer.model
-        self.epoch = self.trainer.epoch
-        self.extra_args = self.trainer.extra_args
+
+        self._runner = self._build_runner(config, self._result_logger.logdir)
+        self.args = self._runner.args
+        self.model = self._runner.model
+        self.epoch = self._runner.epoch
+        self.extra_args = self._runner.extra_args
+
+        # TODO: make it optioonal with logging
         print(self.args.pretty())
         print(self.extra_args.pretty())
 
@@ -31,27 +46,46 @@ class TuneWrapper(tune.Trainable):
             return {}
 
         # -- Training epoch
-        self.trainer.train_epoch(self.trainer.train_loader['labelled'])
-        self.epoch = self.trainer.epoch
+        # TODO: now labelled is hardcoded, make it general
+        self._runner.train_epoch(self._runner.train_loader['labelled'])
+        self.epoch = self._runner.epoch
 
         # -- Validation
-        val_set = args.early_stopping.get('dataset', 'validation')
-        outputs = self.trainer.validate(
-            self.trainer.val_loader[val_set],
-            log_descr=val_set,
-            logger=self.trainer.logger)
+        val_outputs_flat = OrderedDict()
+        for key_loader, val_loader in self._runner.val_loader.items():
 
-        for key, val in outputs['stats'].items():
-            if isinstance(val, torch.Tensor):
-                outputs['stats'][key] = val.item()
-        return outputs['stats']
+            # -- Validate over all datasets
+            outputs = self._runner.validate(
+                val_loader, log_descr=key_loader, logger=self._runner.logger)
+
+            # - collect and return flatten metrics
+            for key_stats, val_stats in outputs['stats'].items():
+                if 'scalar' in val_stats.keys():
+                    out_flat = flatten_dict(val_stats['scalar'], key_loader)
+                elif 'scalars' in val_stats.keys():
+                    out_flat = flatten_dict(val_stats['scalars'], key_loader)
+                else:
+                    out_flat = flatten_dict(val_stats, parent_key=key_loader)
+                val_outputs_flat.update(out_flat)
+
+        # -- Be sure that values are scalar and not tensor
+        for key, val in val_outputs_flat.items():
+            val_outputs_flat[key] = self._get_scalar(val)
+
+        return val_outputs_flat
+
+    def _get_scalar(self, val):
+        if isinstance(val, torch.Tensor):
+            return val.item()
+        return val
 
     def _save(self, checkpoint_dir):
-        return self.trainer.save_checkpoint(
-            checkpoint_dir, "epoch%d.ckpt" % self.trainer.epoch)
+        return self._runner.save_checkpoint(
+            checkpoint_dir, "epoch%d.ckpt" % self._runner.epoch)
 
     def _restore(self, checkpoint_path):
-        self.trainer.load_checkpoint(checkpoint_path)
+        # TODO: this has to be checked
+        self._runner.load_checkpoint(checkpoint_path)
 
 
 class EarlyStoppingRule(FIFOScheduler):
@@ -85,9 +119,8 @@ class EarlyStoppingRule(FIFOScheduler):
 
     def on_trial_result(self, trial_runner, trial, result):
         """Callback for early stopping.
-        This stopping rule stops a running trial if the trial's best objective
-        value by step `t` is strictly worse than the median of the running
-        averages of all completed trials' objectives reported up to step `t`.
+        This stopping rule stops a running trial if the trial's objective
+        does not improve for 'patience' number of time.
         """
 
         if len(self._results[trial]) == 0:
