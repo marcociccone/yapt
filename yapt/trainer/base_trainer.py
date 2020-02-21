@@ -11,15 +11,8 @@ from copy import deepcopy
 
 from omegaconf import OmegaConf
 from yapt.utils.trainer_utils import detach_dict, to_device
-from yapt.utils.utils import safe_mkdirs, is_dict, is_list
+from yapt.utils.utils import safe_mkdirs, is_dict, is_list, get_maybe_missing_args
 from yapt.core.logger.tensorboardXsafe import SummaryWriter
-
-
-def get_maybe_missing(args, key, default=None):
-    if OmegaConf.is_missing(args, key):
-        return default
-    else:
-        return args.get(key)
 
 
 def recursive_get(_dict, *keys):
@@ -108,7 +101,7 @@ class BaseTrainer(ABC):
 
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
-        self._restart_path = get_maybe_missing(args, 'restart_path')
+        self._restart_path = self.get_maybe_missing_args('restart_path')
         self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
         if self._restart_path is not None and not self._args.use_new_dir:
             if os.path.isfile(self._restart_path):
@@ -141,6 +134,9 @@ class BaseTrainer(ABC):
 
         safe_mkdirs(self._logdir, exist_ok=True)
         return SummaryWriter(log_dir=self._logdir)
+
+    def get_maybe_missing_args(self, key, default=None):
+        return get_maybe_missing_args(self.args, key, default)
 
     # def get_modifiable_args(self, keys=[]):
     #     # This works only on the first level
@@ -292,7 +288,7 @@ class BaseTrainer(ABC):
             # random.seed(self.seed)  # Python random module.
             self.print_verbose("Random seed: {}".format(self._seed))
 
-        if self._use_cuda and args.cudnn is not None:
+        if self._use_cuda and self.get_maybe_missing_args('cudnn') is not None:
             torch.backends.cudnn.benchmark = args.cudnn.benchmark
             torch.backends.cudnn.deterministic = args.cudnn.deterministic
             self.print_verbose("cudnn.benchmark: {}".format(args.cudnn.benchmark))

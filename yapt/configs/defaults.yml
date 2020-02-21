@@ -9,6 +9,13 @@ loggers:
     logdir: './logs'
     log_every: 10
 
+optimizer:
+    name: 'adam'
+    params:
+        lr: 0.001
+    regularizers:
+        weight_decay: 0.0
+
 sacred:
     use_sacred: False
     mongodb_disable: False
@@ -18,7 +25,7 @@ sacred:
     mongodb_prefix: ''
 
 tqdm:
-    ncols: 80
+    ncols: 120
     dynamic_ncols: False
     leave: False
     disable: False

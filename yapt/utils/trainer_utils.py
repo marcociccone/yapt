@@ -127,6 +127,18 @@ def get_optimizer(name):
     return optimizers[name.lower()]
 
 
+class ToTensor1D(object):
+    """Convert a `numpy.ndarray` to tensor. Unlike `ToTensor` from torchvision,
+    this converts numpy arrays regardless of the number of dimensions.
+    Converts automatically the array to `float32`.
+    """
+    def __call__(self, array):
+        return torch.from_numpy(array.astype('float32'))
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+
 class DisableGradNotScriptContext:
     def __init__(self, model):
         self.model = model

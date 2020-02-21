@@ -70,7 +70,7 @@ class Trainer(SacredTrainer):
 
         # -- Early Stopping
         self.max_epochs = args.max_epochs
-        self.early_stopping = args.early_stopping
+        self.early_stopping = self.get_maybe_missing_args('early_stopping')
 
     def init_data_loaders(self, data_loaders: dict):
 
@@ -93,16 +93,34 @@ class Trainer(SacredTrainer):
                 len(self._train_loader['labelled']),
                 len(self._train_loader['unlabelled']))
         else:
-            self.num_batches_train = len(self._train_loader)
             if isinstance(self._train_loader, dict):
                 assert 'labelled' in self._train_loader.keys(), \
                     "Train loader dict should contain 'labelled' key"
             else:
                 self._train_loader = {'labelled': self._train_loader}
 
+            # -- get train loader len
+            self.num_batches_train = self.get_maybe_missing_args('num_batches_train')
+            if self.num_batches_train is None:
+                self.num_batches_train = len(self._train_loader['labelled'])
+
         if self._val_loader is not None:
             if not isinstance(self._val_loader, dict):
                 self._val_loader = {'validation': self._val_loader}
+
+            # -- get val loaders len
+            num_batches_val = self.get_maybe_missing_args('num_batches_val')
+            self.num_batches_val = dict()
+            for k, v in self._val_loader.items():
+                self.num_batches_val[k] = len(v) if num_batches_val is None \
+                    else num_batches_val
+
+        # -- get test loader len
+        if self._test_loader is not None:
+            self.num_batches_test = self.get_maybe_missing_args('num_batches_test')
+            if self.num_batches_test is None:
+                self.num_batches_test = len(self._test_loader)
+                self.num_batches_val['test'] = len(self._test_loader)
 
     def json_results(self, savedir, test_score):
         try:
@@ -230,12 +248,11 @@ class Trainer(SacredTrainer):
         self._model.init_train_stats()
         self.outputs_train.append([])
 
-        pbar_descr_prefix = "Epoch %d (best: %d, beaten: %d) - " % (
+        pbar_descr_prefix = "ep %d (best: %d beaten: %d) - " % (
             self._epoch, self._best_epoch, self._beaten_epochs)
 
-        pbar = tqdm(total=self.num_batches_train,
-                    desc=pbar_descr_prefix,
-                    **self.args.tqdm)
+        pbar = tqdm(dataloader, total=self.num_batches_train,
+                    desc='', **self.args.tqdm)
 
         # -- Start epoch
         for batch_idx, batch in enumerate(dataloader):
@@ -258,9 +275,13 @@ class Trainer(SacredTrainer):
                 self._model.log_train(
                     outputs.get('stats', dict()), self._logger)
 
-            running_tqdm = stats_to_str(outputs.get('running_tqdm', dict()))
-            pbar.set_description(pbar_descr_prefix + running_tqdm)
+            running_tqdm = outputs.get('running_tqdm', dict())
+            # pbar.set_postfix(ordered_dict=running_tqdm)
+            pbar.set_description("ep %d - %s" % (
+                self.epoch, stats_to_str(running_tqdm)))
             pbar.update()
+            if batch_idx >= self.num_batches_train:
+                break
 
         pbar.clear()
         pbar.close()
@@ -321,7 +342,7 @@ class Trainer(SacredTrainer):
             output_val = dict()
             for kk, vv in self._val_loader.items():
                 output_val[kk] = self.validate(
-                    vv, log_descr=kk, logger=self._logger)
+                    vv, set_name=kk, logger=self._logger)
             print("")
 
             is_best_epoch, best_score = self._model.early_stopping(
@@ -342,14 +363,14 @@ class Trainer(SacredTrainer):
         if self._test_loader is not None:
             # TODO !!!
             output_test = self.validate(
-                self._test_loader, log_descr="test", logger=None)
+                self._test_loader, set_name="test", logger=None)
             self.json_results(self._logdir, output_test)
         else:
             output_test = output_val[kk]
 
         return output_test
 
-    def validate(self, dataloader, log_descr="validation", logger=None):
+    def validate(self, dataloader, set_name="validation", logger=None):
         """
         Computes the accuracy of the network against a validation set
         :param dataloader: A DataLoader object producing validation/test samples
@@ -362,7 +383,7 @@ class Trainer(SacredTrainer):
         self._model.eval()
         self._model.init_val_stats()
 
-        pbar_descr_prefix = "\t%s - " % log_descr.title()
+        pbar_descr_prefix = "  %s - " % set_name.title()
 
         # TODO!!
         # Disable network grad while evaluating the model
@@ -372,16 +393,20 @@ class Trainer(SacredTrainer):
 
         # --------------------------------------------------------------------
 
-        pbar = tqdm(total=len(dataloader), desc=pbar_descr_prefix,
-                    **self.args.tqdm)
+        pbar = tqdm(dataloader, total=self.num_batches_val[set_name],
+                    desc=pbar_descr_prefix, **self.args.tqdm)
 
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)
             outputs = self._model.validation_step(device_batch, self._epoch)
 
-            running_tqdm = stats_to_str(outputs.get('running_tqdm', dict()))
-            pbar.set_description(pbar_descr_prefix + running_tqdm)
+            running_tqdm = outputs.get('running_tqdm', dict())
+            # pbar.set_postfix(ordered_dict=running_tqdm)
+            # pbar.set_postfix_str(stats_to_str(running_tqdm))
+            pbar.set_description(pbar_descr_prefix + stats_to_str(running_tqdm))
             pbar.update()
+            if batch_idx >= self.num_batches_val[set_name]:
+                break
 
         pbar.clear()
         pbar.close()
@@ -390,12 +415,12 @@ class Trainer(SacredTrainer):
 
         if logger is not None:
             self._model.log_val(
-                self._epoch, log_descr,
+                self._epoch, set_name,
                 outputs.get('stats', dict()), logger)
 
         self._model.reset_val_stats()
         final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
-        print("\t%s - %s" % (log_descr.title(), final_tqdm))
+        print("  %s - %s" % (set_name.title(), final_tqdm))
         return outputs
 
     def only_test(self):
@@ -411,7 +436,7 @@ class Trainer(SacredTrainer):
 
         if self._test_loader is not None:
             output_test = self.validate(
-                self._test_loader, log_descr="test", logger=None)
+                self._test_loader, set_name="test", logger=None)
             self.json_results(self._logdir, output_test)
             return output_test
 
@@ -430,10 +455,10 @@ class Trainer(SacredTrainer):
         if torch.is_grad_enabled():
             print("WARNING: You should handle no_grad by yourself for now!")
 
-        pbar = tqdm(total=len(dataloader), desc='test',
-                    **self.args.tqdm)
+        pbar = tqdm(dataloader, total=self.num_batches_test,
+                    desc='test', **self.args.tqdm)
 
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)
             out = self._model.test_step(device_batch)
 
@@ -446,6 +471,9 @@ class Trainer(SacredTrainer):
                 out_dict.setdefault(key, []).append(val)
 
             pbar.update()
+            if batch_idx >= self.num_batches_train:
+                break
+
         pbar.clear()
         pbar.close()
 

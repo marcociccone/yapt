@@ -1,3 +1,4 @@
+import torch
 import inspect
 import hashlib
 import os
@@ -11,6 +12,14 @@ from PIL import Image
 from textwrap import wrap
 from omegaconf import ListConfig, DictConfig
 from collections import MutableMapping
+from omegaconf import OmegaConf
+
+
+def get_maybe_missing_args(args, key, default=None):
+    if OmegaConf.is_missing(args, key):
+        return default
+    else:
+        return args.get(key)
 
 
 def is_list(obj):
@@ -43,6 +52,8 @@ def stats_to_str(stats, fmt=":.4f"):
         "stats should be a dict instead is a {}".format(type(stats))
     string = ''
     for key, val in stats.items():
+        if isinstance(val, torch.Tensor):
+            val = val.item()
         string += ("{}: {" + fmt + "} - ").format(key, val)
     return string
 

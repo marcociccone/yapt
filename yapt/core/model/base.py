@@ -1,7 +1,9 @@
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-from yapt.utils.utils import call_counter, warning_not_implemented
+from yapt.utils.utils import call_counter, warning_not_implemented, get_maybe_missing_args
+from yapt.utils.trainer_utils import get_optimizer
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 
 
 class BaseModel(ABC, nn.Module):
@@ -44,6 +46,9 @@ class BaseModel(ABC, nn.Module):
     def val_step(self):
         return self._val_step
 
+    def get_maybe_missing_args(self, key, default=None):
+        return get_maybe_missing_args(self.args, key, default)
+
     def build_model(self):
         self._build_model()
 
@@ -83,10 +88,12 @@ class BaseModel(ABC, nn.Module):
 
     def reset_train_stats(self) -> None:
         self._train_step = 0
+        self._train_meters = OrderedDict()
         self._reset_train_stats()
 
     def reset_val_stats(self) -> None:
         self._val_step = 0
+        self._val_meters = OrderedDict()
         self._reset_val_stats()
 
     def log_train(self, stats: dict, logger: SummaryWriter) -> None:
@@ -108,9 +115,21 @@ class BaseModel(ABC, nn.Module):
     def _build_model(self) -> None:
         pass
 
-    @abstractmethod
-    def _configure_optimizer(self) -> dict:
-        pass
+    def _configure_optimizer(self, parameters=None):
+        # -- if not specified, get tall the model parameters
+        parameters = self.parameters() if parameters is None else parameters
+
+        args = self.args
+        opt_params = self.args.optimizer.params
+        weight_decay = self.args.optimizer.regularizers.weight_decay
+
+        # -- Get optimizer from args
+        opt_class = get_optimizer(args.optimizer.name)
+
+        # -- Instantiate optimizer with specific parameters
+        optimizer = opt_class(
+            parameters, weight_decay=weight_decay, **opt_params)
+        return optimizer
 
     def _configure_scheduler_optimizer(self) -> dict:
         warning_not_implemented()

@@ -31,10 +31,9 @@ class TuneWrapper(tune.Trainable):
         self._runner = self._build_runner(config, self._result_logger.logdir)
         self.args = self._runner.args
         self.model = self._runner.model
-        self.epoch = self._runner.epoch
         self.extra_args = self._runner.extra_args
 
-        # TODO: make it optioonal with logging
+        # TODO: make it optional with logging
         print(self.args.pretty())
         print(self.extra_args.pretty())
 
@@ -80,12 +79,11 @@ class TuneWrapper(tune.Trainable):
         return val
 
     def _save(self, checkpoint_dir):
-        return self._runner.save_checkpoint(
-            checkpoint_dir, "epoch%d.ckpt" % self._runner.epoch)
+        return self._runner.save_checkpoint(checkpoint_dir, 'model.pt')
 
     def _restore(self, checkpoint_path):
         # TODO: this has to be checked
-        self._runner.load_checkpoint(checkpoint_path)
+        self._runner.load_checkpoint(checkpoint_path, 'model.pt')
 
 
 class EarlyStoppingRule(FIFOScheduler):

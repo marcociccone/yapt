@@ -40,6 +40,10 @@ class Classifier(BaseModel):
         return F.nll_loss(logits, labels)
 
     def _configure_optimizer(self):
+        """
+            This is the default implementation in BaseModel,
+            I let it here just to show how this method should be implemented
+        """
         args = self.args
         opt_params = self.args.optimizer.params
         weight_decay = self.args.optimizer.regularizers.weight_decay
