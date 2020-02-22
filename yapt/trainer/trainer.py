@@ -120,7 +120,7 @@ class Trainer(SacredTrainer):
             self.num_batches_test = self.get_maybe_missing_args('num_batches_test')
             if self.num_batches_test is None:
                 self.num_batches_test = len(self._test_loader)
-                self.num_batches_val['test'] = len(self._test_loader)
+            self.num_batches_val['test'] = self.num_batches_test
 
     def json_results(self, savedir, test_score):
         try:
