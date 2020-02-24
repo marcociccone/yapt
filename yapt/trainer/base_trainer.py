@@ -80,7 +80,7 @@ class BaseTrainer(ABC):
         return self._cli_args
 
     def __init__(self,
-                 model_class=None,
+                 model_class,
                  extra_args=None,
                  external_logdir=None,
                  init_seeds=True):
@@ -94,11 +94,8 @@ class BaseTrainer(ABC):
         self._device = torch.device("cuda" if self._use_cuda else "cpu")
         self.print_verbose("Device: {}".format(self._device))
 
-        # -- 0. Init random seed
+        # -- Init random seed
         self.init_seeds(init_seeds)
-
-        # -- X. here it was data loader init and model
-
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
         self._restart_path = self.get_maybe_missing_args('restart_path')
@@ -114,16 +111,21 @@ class BaseTrainer(ABC):
                     self._restart_path)
         else:
             self._logdir = os.path.join(
-                args.loggers.logdir, args.dataset_name.lower(),
+                args.loggers.logdir,
+                args.dataset_name.lower(),
+                model_class.__name__. lower(),
                 self._timestring + "_%s" % args.exp_name)
 
         self._logger = self.create_logger(external_logdir)
         self.dump_args(self._logdir)
 
-        # -- 2. Load Model
         # TODO: here we should handle dataparallel table and distributed mode
-        model = self.set_model() if model_class is None \
-            else model_class(args, logger=self._logger, device=self._device)
+
+        # -- Load Model
+        # model = self.set_model() if model_class is None \
+        #     else model_class(args, logger=self._logger, device=self._device)
+        model = model_class(args, logger=self._logger, device=self._device)
+        # -- Move model to device
         self._model = model.to(self._device)
 
     def create_logger(self, external_logdir=None):
@@ -176,19 +178,25 @@ class BaseTrainer(ABC):
             self._defaults_yapt = OmegaConf.merge(
                 self._defaults_yapt, OmegaConf.load(file))
 
+        # -- 0. From command line
+        self._cli_args = OmegaConf.from_cli()
+
+        if self._cli_args.config is not None:
+            self.default_config = self._cli_args.config
+            del self._cli_args['config']
+            print("WARNING: override default config with: %s"
+                  % self.default_config)
+
         # -- 1. From experiment default config file
         self._default_config_args = OmegaConf.load(self.default_config)
 
-        # -- 2. From command line
-        self._cli_args = OmegaConf.from_cli()
-
-        # -- 3. From experiment custom config file (passed from cli)
+        # -- 2. From experiment custom config file (passed from cli)
         self._custom_config_args = OmegaConf.create(dict())
         if self._cli_args.custom_config is not None:
             self._custom_config_args = OmegaConf.load(
                 self._cli_args.custom_config)
 
-        # -- 4. Extra config from Tune or any script
+        # -- 3. Extra config from Tune or any script
         if is_dict(extra_args):
             matching = [s for s in extra_args.keys() if "." in s]
             if len(matching) > 0:
@@ -208,12 +216,12 @@ class BaseTrainer(ABC):
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
 
-        # -- 5. Merge default args
+        # -- 4. Merge default args
         self._args = OmegaConf.merge(
             self._defaults_yapt,
             self._default_config_args)
 
-        # -- 6. make args structured: it fails if accessing a missing key
+        # -- 5. make args structured: it fails if accessing a missing key
         OmegaConf.set_struct(self._args, True)
 
         # -- Save optimizer args for later
@@ -224,7 +232,7 @@ class BaseTrainer(ABC):
         if dict_opt_extra is not None:
             del self._extra_args['optimizer']
 
-        # -- 7. override custom args, ONLY IF THEY EXISTS
+        # -- 6. override custom args, ONLY IF THEY EXISTS
         self._args = OmegaConf.merge(
             self._args,
             self._custom_config_args,
@@ -299,9 +307,9 @@ class BaseTrainer(ABC):
         raise NotImplementedError("Implement this method to return a dict \
                                    of dataloaders or pass it to the constructor")
 
-    def set_model(self):
-        raise NotImplementedError("Implement this method to return your model \
-                                   or pass it to the constructor")
+    # def set_model(self):
+    #     raise NotImplementedError("Implement this method to return your model \
+    #                                or pass it to the constructor")
 
     def log_args(self):
         name_str = os.path.basename(sys.argv[0])

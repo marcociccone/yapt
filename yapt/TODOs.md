@@ -18,6 +18,9 @@
 - https://github.com/ray-project/ray/blob/master/python/ray/experimental/sgd/pytorch/examples/train_example.py
 
 ## Logger
+- [] Ray Tune and Neptune AI ? Better than using sacred?
+- [] Integrate logging python instead of print.
+
 - [x] should we use Tune logger? is it feasible? At least save in the same folder!
     - Yes, but the metrics you want to log should be returned in _train as result dictionary.
 - [] add time statistics for each method as in ray sgd pytorch runner

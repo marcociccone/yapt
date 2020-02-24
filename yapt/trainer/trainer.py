@@ -255,7 +255,7 @@ class Trainer(SacredTrainer):
                     desc='', **self.args.tqdm)
 
         # -- Start epoch
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)
 
             # -- Model specific schedulers
