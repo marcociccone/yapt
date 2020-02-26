@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -71,11 +70,11 @@ class Classifier(BaseModel):
         loss.backward()
         self.optimizer.step()
 
-        self.meters['loss'].update(loss)
+        self._train_meters['loss'].update(loss)
         stats = {'loss': loss}
 
         running_tqdm, final_tqdm = OrderedDict(), OrderedDict()
-        for key, meter in self.meters.items():
+        for key, meter in self._train_meters.items():
             running_tqdm[key] = meter.val
             final_tqdm[key] = meter.avg
 
@@ -100,14 +99,14 @@ class Classifier(BaseModel):
             y_preds = y_probs.argmax(1)
             val_acc = torch.mean((y == y_preds).float())
 
-            self.meters_val['val_loss'].update(val_loss)
-            self.meters_val['val_acc'].update(val_acc)
-            self.meters_val['val_cm'].update(y, y_probs)
+            self._val_meters['loss'].update(val_loss)
+            self._val_meters['acc'].update(val_acc)
+            self._val_meters['cm'].update(y, y_probs)
 
             # -- This will be logged in tensorboard
             stats = {
-                'loss': self.meters_val['val_loss'].avg,
-                'acc': self.meters_val['val_acc'].avg,
+                'loss': self._val_meters['loss'].avg,
+                'acc': self._val_meters['acc'].avg,
             }
 
             output = OrderedDict({
@@ -120,14 +119,12 @@ class Classifier(BaseModel):
             return output
 
     def _reset_train_stats(self):
-        self.meters = dict()
-        self.meters['loss'] = AverageMeter('loss')
+        self._train_meters['loss'] = AverageMeter('loss')
 
     def _reset_val_stats(self):
-        self.meters_val = dict()
-        self.meters_val['val_acc'] = AverageMeter('val_acc')
-        self.meters_val['val_loss'] = AverageMeter('val_loss')
-        self.meters_val['val_cm'] = ConfusionMatrix('val_cm', self.args.net_params.out_dim)
+        self._val_meters['acc'] = AverageMeter('acc')
+        self._val_meters['loss'] = AverageMeter('loss')
+        self._val_meters['cm'] = ConfusionMatrix('cm', self.args.net_params.out_dim)
 
     def early_stopping(self, current_stats: dict, best_stats: dict) -> bool:
         # TODO: I don't like the way is done here, too many dictionaries

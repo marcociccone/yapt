@@ -8,14 +8,16 @@ from yapt import TuneWrapper, EarlyStoppingRule
 from mnist_trainer import TrainerMNIST
 from model import Classifier
 
-import logging
-logging.basicConfig(level=logging.DEBUG)
+# import logging
+# logging.basicConfig(level=logging.DEBUG)
 
 
 class TuneMNIST(TuneWrapper):
 
-    def _build_runner(self, config):
-        return TrainerMNIST(extra_args=config, model_class=Classifier)
+    def _build_runner(self, config, logdir):
+        return TrainerMNIST(extra_args=config,
+                            external_logdir=logdir,
+                            model_class=Classifier)
 
 
 if __name__ == "__main__":
@@ -33,7 +35,7 @@ if __name__ == "__main__":
 
     tune_config = {
         'dry_run': False,
-        'tqdm': {'disable': True},
+        'loggers': {'tqdm': {'disable': True}},
         'optimizer': {
             'name': 'sgd',
             'params': {
@@ -44,25 +46,26 @@ if __name__ == "__main__":
     }
 
     # -- Ray initialization and scheduler
-    ray.init(address=args.ray_address, log_to_driver=True)
-    # sched = ASHAScheduler(metric="acc")
-    sched = EarlyStoppingRule(metric="acc", patience=10)
+    # -- NOTE: local_mode=True for debugging
+    ray.init(address=args.ray_address, log_to_driver=True, local_mode=True)
+    # sched = ASHAScheduler(metric="validation/acc")
+    sched = EarlyStoppingRule(metric="validation/acc", patience=10)
 
     analysis = tune.run(
         TuneMNIST,
         scheduler=sched,
         stop={
-            "training_iteration": 2
+            "training_iteration": 25
         },
         resources_per_trial={
             "cpu": 3,
-            "gpu": 1
+            "gpu": 0.1
         },
-        num_samples=2,
+        num_samples=1,
         checkpoint_at_end=True,
-        checkpoint_freq=10,
+        checkpoint_freq=1,
         config=tune_config,
-        local_dir='./logs/new'
+        local_dir='./logs/neptune'
     )
 
     print("Best config is:", analysis.get_best_config(metric="acc"))

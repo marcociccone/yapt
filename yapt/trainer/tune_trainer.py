@@ -5,7 +5,7 @@ from collections import OrderedDict, defaultdict
 from abc import abstractmethod
 
 from yapt import Trainer
-from yapt.utils.utils import flatten_dict
+from yapt.utils.utils import flatten_dict, is_dict
 from yapt.core.model import BaseModel
 from ray import tune
 from ray.tune.schedulers.trial_scheduler import FIFOScheduler, TrialScheduler
@@ -47,23 +47,28 @@ class TuneWrapper(tune.Trainable):
         self._runner.train_epoch(self._runner.train_loader['labelled'])
         self.epoch = self._runner.epoch
 
-        # -- Validation
+        # -- Validate over all datasets
         val_outputs_flat = OrderedDict()
         for key_loader, val_loader in self._runner.val_loader.items():
 
-            # -- Validate over all datasets
+            # -- Validation on val_loader
             outputs = self._runner.validate(
-                val_loader, log_descr=key_loader, logger=self._runner.logger)
+                val_loader, set_name=key_loader, logger=self._runner.logger)
 
-            # - collect and return flatten metrics
+            # -- TODO: flatten_Dict should not be necessary,
+            # -- prefix key is already concatenated in validate method
+            # -- collect and return flatten metrics
             for key_stats, val_stats in outputs['stats'].items():
-                if 'scalar' in val_stats.keys():
-                    out_flat = flatten_dict(val_stats['scalar'], key_loader)
-                elif 'scalars' in val_stats.keys():
-                    out_flat = flatten_dict(val_stats['scalars'], key_loader)
+                if is_dict(val_stats):
+                    if 'scalar' in val_stats.keys():
+                        _flat = flatten_dict(val_stats['scalar'], False)
+                    elif 'scalars' in val_stats.keys():
+                        _flat = flatten_dict(val_stats['scalars'], False)
+                    else:
+                        _flat = flatten_dict(val_stats, False)
                 else:
-                    out_flat = flatten_dict(val_stats, parent_key=key_loader)
-                val_outputs_flat.update(out_flat)
+                    _flat = {key_stats: val_stats}
+                val_outputs_flat.update(_flat)
 
         # -- Be sure that values are scalar and not tensor
         for key, val in val_outputs_flat.items():
@@ -77,11 +82,11 @@ class TuneWrapper(tune.Trainable):
         return val
 
     def _save(self, checkpoint_dir):
-        return self._runner.save_checkpoint(checkpoint_dir, 'model.pt')
+        return self._runner.save_checkpoint(path=checkpoint_dir)
 
     def _restore(self, checkpoint_path):
         # TODO: this has to be checked
-        self._runner.load_checkpoint(checkpoint_path, 'model.pt')
+        self._runner.load_checkpoint(checkpoint_path)
 
 
 class EarlyStoppingRule(FIFOScheduler):

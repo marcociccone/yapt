@@ -54,6 +54,10 @@ class Trainer(BaseTrainer):
     def checkpoints_dir(self):
         return os.path.join(self._logdir, 'checkpoints')
 
+    @property
+    def checkpoints_format(self):
+        return self.args.loggers.checkpoints_format
+
     def __init__(self, data_loaders=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -144,10 +148,16 @@ class Trainer(BaseTrainer):
             self.console_log.error(
                 "Error occurred while saving results into JSON: %s", e)
 
-    def save_checkpoint(self, step=None):
-        path = self.checkpoints_dir
-        step = self._epoch if step is None else step
-        filename = 'epoch_{}.pt'.format(step)
+    def save_checkpoint(self, path=None, filename=None):
+        if filename is None:
+            filename = self._epoch
+
+        if isinstance(filename, int):
+            filename = self.checkpoints_format.format(filename)
+
+        if path is None:
+            path = self.checkpoints_dir
+
         safe_mkdirs(path, exist_ok=True)
 
         try:
@@ -181,12 +191,15 @@ class Trainer(BaseTrainer):
         return filename
 
     def load_checkpoint(self, filename=None):
+
         path = self.checkpoints_dir
+        ckp_format = self.checkpoints_format
+
         if filename is None:
-            filename = os.path.join(path, 'epoch_{}.pt'.format(self._epoch))
+            filename = os.path.join(path, ckp_format.format(self._epoch))
 
         elif isinstance(filename, int):
-            filename = os.path.join(path, 'epoch_{}.pt'.format(filename))
+            filename = os.path.join(path, ckp_format.format(filename))
 
         assert isinstance(filename, str), \
             'filename should be the epoch (int) or the checkpoint path (str)'
@@ -208,14 +221,19 @@ class Trainer(BaseTrainer):
                 checkpoint['optimizer_state_dict'])
 
     def restart_exp(self):
-        # check if restart_path is a specific checkpoint
+        ckp_format = self.checkpoints_format
         if os.path.isfile(self._restart_path):
+            # check if restart_path is a specific checkpoint
             self.console_log.info("Reload checkpoint: %s", self._restart_path)
             self.load_checkpoint(self._restart_path)
-        # else restore last one
         else:
-            regex = re.compile(r'.*epoch_(\d+)\.pt')
-            checkpoints = glob.glob(os.path.join(self._restart_path, "*.pt"))
+            # restore last one
+            regex = re.compile(r'.*' + ckp_format.format('(\d+)'))
+
+            _, ext = os.path.splitext(ckp_format)
+            checkpoints = glob.glob(os.path.join(
+                self._restart_path, "*.{}".format(ext)))
+
             # Sort checkpoints
             checkpoints = sorted(
                 checkpoints, key=lambda f: int(regex.findall(f)[0]))
@@ -427,6 +445,9 @@ class Trainer(BaseTrainer):
         # --------------------------------------------------------------------
 
         if logger is not None:
+            # NOTE: every key in outputs['stats']
+            # is modified with set_name as prefix --> validation/acc
+            # this is useful for any logger: tb, neptune, ray
             self._model.log_val(set_name, outputs.get('stats', dict()))
 
         self._model.reset_val_stats()
