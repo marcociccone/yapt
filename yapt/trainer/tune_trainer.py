@@ -1,16 +1,14 @@
 import torch
 import logging
-import collections
-import numpy as np
 
-from ray.tune.schedulers.trial_scheduler import FIFOScheduler, TrialScheduler
+from collections import OrderedDict, defaultdict
+from abc import abstractmethod
 
 from yapt import Trainer
 from yapt.utils.utils import flatten_dict
-from yapt.core.model.base import BaseModel
-from collections import OrderedDict
-from abc import abstractmethod
+from yapt.core.model import BaseModel
 from ray import tune
+from ray.tune.schedulers.trial_scheduler import FIFOScheduler, TrialScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +110,8 @@ class EarlyStoppingRule(FIFOScheduler):
         self._compare_op = max if mode == "max" else min
         self._hard_stop = hard_stop
         self._patience = patience
-        self._results = collections.defaultdict(list)
-        self._beaten = collections.defaultdict(int)
+        self._results = defaultdict(list)
+        self._beaten = defaultdict(int)
 
     def on_trial_result(self, trial_runner, trial, result):
         """Callback for early stopping.

@@ -8,6 +8,26 @@ verbose: True
 loggers:
     logdir: './logs'
     log_every: 10
+    log_grads_norm: 2
+
+    tqdm:
+        ncols: 120
+        dynamic_ncols: False
+        leave: False
+        disable: False
+
+   # neptune:
+   #      project_name: 'USERNAME/test'
+   #      experiment_name: 'test'
+   #      offline_mode: False
+
+    # sacred:
+    #     use_sacred: False
+    #     mongodb_disable: False
+    #     mongodb_url: '127.0.0.1'
+    #     mongodb_port: 27017
+    #     mongodb_name: ''
+    #     mongodb_prefix: ''
 
 optimizer:
     name: 'adam'
@@ -15,18 +35,4 @@ optimizer:
         lr: 0.001
     regularizers:
         weight_decay: 0.0
-
-sacred:
-    use_sacred: False
-    mongodb_disable: False
-    mongodb_url: '127.0.0.1'
-    mongodb_port: 27017
-    mongodb_name: ''
-    mongodb_prefix: ''
-
-tqdm:
-    ncols: 120
-    dynamic_ncols: False
-    leave: False
-    disable: False
 

@@ -9,9 +9,10 @@ from itertools import cycle, islice
 
 from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
 from yapt.utils.utils import stats_to_str, safe_mkdirs
-from yapt.utils.utils import is_notebook, is_dict
+from yapt.utils.utils import is_notebook, is_dict, is_optimizer
 
-from yapt.trainer.sacred_trainer import SacredTrainer
+# from yapt.trainer.sacred_trainer import SacredTrainer
+from yapt.trainer.base import BaseTrainer
 
 if is_notebook():
     from tqdm import tqdm_notebook as tqdm
@@ -19,7 +20,7 @@ else:
     from tqdm import tqdm
 
 
-class Trainer(SacredTrainer):
+class Trainer(BaseTrainer):
 
     @property
     def epoch(self):
@@ -48,6 +49,10 @@ class Trainer(SacredTrainer):
     @property
     def test_loader(self):
         return self._test_loader
+
+    @property
+    def checkpoints_dir(self):
+        return os.path.join(self._logdir, 'checkpoints')
 
     def __init__(self, data_loaders=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -136,10 +141,13 @@ class Trainer(SacredTrainer):
                 json.dump(results, fp)
 
         except Exception as e:
-            print("An error occurred while saving results into JSON:")
-            print(e)
+            self.console_log.error(
+                "Error occurred while saving results into JSON: %s", e)
 
-    def save_checkpoint(self, path, filename):
+    def save_checkpoint(self, step=None):
+        path = self.checkpoints_dir
+        step = self._epoch if step is None else step
+        filename = 'epoch_{}.pt'.format(step)
         safe_mkdirs(path, exist_ok=True)
 
         try:
@@ -168,14 +176,22 @@ class Trainer(SacredTrainer):
             torch.save(current_state_dict, filename)
 
         except Exception as e:
-            print("An error occurred while saving the checkpoint:")
-            print(e)
+            self.console_log.error(
+                "Error occurred while saving the checkpoint: %s", e)
         return filename
 
-    def load_checkpoint(self, path, filename):
-        ckpt_path = os.path.join(path, filename)
+    def load_checkpoint(self, filename=None):
+        path = self.checkpoints_dir
+        if filename is None:
+            filename = os.path.join(path, 'epoch_{}.pt'.format(self._epoch))
 
-        checkpoint = torch.load(ckpt_path)
+        elif isinstance(filename, int):
+            filename = os.path.join(path, 'epoch_{}.pt'.format(filename))
+
+        assert isinstance(filename, str), \
+            'filename should be the epoch (int) or the checkpoint path (str)'
+
+        checkpoint = torch.load(filename)
         self._global_step = checkpoint.get('global_step', checkpoint.get('seen', 0))
         self._epoch = checkpoint['epoch']
         self._best_epoch = checkpoint['best_epoch']
@@ -194,37 +210,36 @@ class Trainer(SacredTrainer):
     def restart_exp(self):
         # check if restart_path is a specific checkpoint
         if os.path.isfile(self._restart_path):
-            print("Reload checkpoint: %s" % self._restart_path)
-            self.load_checkpoint("", self._restart_path)
+            self.console_log.info("Reload checkpoint: %s", self._restart_path)
+            self.load_checkpoint(self._restart_path)
         # else restore last one
         else:
-            regex = re.compile(r'.*epoch(\d+)\.ckpt')
-            checkpoints = glob.glob(os.path.join(self._restart_path, "*.ckpt"))
+            regex = re.compile(r'.*epoch_(\d+)\.pt')
+            checkpoints = glob.glob(os.path.join(self._restart_path, "*.pt"))
             # Sort checkpoints
             checkpoints = sorted(
                 checkpoints, key=lambda f: int(regex.findall(f)[0]))
             last_checkpoint = checkpoints[-1]
-            print("Reload checkpoint: %s" % last_checkpoint)
-            self.load_checkpoint("", last_checkpoint)
+            self.console_log.info("Reload checkpoint: %s", last_checkpoint)
+            self.load_checkpoint(last_checkpoint)
 
     def log_each_epoch(self):
         # -- TODO: add anything else to be logged here
 
         # -- Log learning rates
         optimizers = self._model.optimizer
-        if isinstance(optimizers, torch.optim.Optimizer):
+        if is_optimizer(optimizers):
             current_lr = optimizers.param_groups[0]['lr']
-            self._logger.add_scalar('optim/lr', current_lr, self._epoch)
+            self._logger.log_metric('optim/lr', current_lr, self._epoch)
 
         elif is_dict(optimizers):
             for key, opt in optimizers.items():
                 current_lr = opt.param_groups[0]['lr']
-                self._logger.add_scalar(
+                self._logger.log_metric(
                     'optim/lr_{}'.format(key), current_lr, self._epoch)
         else:
             raise ValueError(
-                "optimizer should be a dict or a \
-                torch.optim.Optimizer object")
+                "optimizer should be a dict or a torch.optim.Optimizer object")
 
     def train_epoch(self, dataloader):
         """
@@ -252,15 +267,14 @@ class Trainer(SacredTrainer):
             self._epoch, self._best_epoch, self._beaten_epochs)
 
         pbar = tqdm(dataloader, total=self.num_batches_train,
-                    desc='', **self.args.tqdm)
+                    desc='', **self.args.loggers.tqdm)
 
         # -- Start epoch
         for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)
 
             # -- Model specific schedulers
-            self._model.custom_schedulers(
-                self._epoch, logger=self._logger)
+            self._model.custom_schedulers()
 
             # -- Execute a training step
             outputs = self._model.training_step(
@@ -270,10 +284,10 @@ class Trainer(SacredTrainer):
             self.collect_outputs(outputs)
             self._global_step = self._model.global_step
 
-            # -- Eventually log statistics on tensorboard
+            # -- Eventually log statistics
             if self._global_step % self.log_every == 0:
-                self._model.log_train(
-                    outputs.get('stats', dict()), self._logger)
+                self._model.log_train(outputs.get('stats', dict()))
+                self._model.log_grads()
 
             running_tqdm = outputs.get('running_tqdm', dict())
             # pbar.set_postfix(ordered_dict=running_tqdm)
@@ -302,22 +316,20 @@ class Trainer(SacredTrainer):
         self.best_epoch_output_val = dict()
 
         if self.early_stopping is not None:
-            self.print_verbose(
-                "Early stopping: set {} - metric {} - patience {}".format(
-                    self.early_stopping.dataset,
-                    self.early_stopping.metric,
-                    self.early_stopping.patience))
+            self.console_log.info(
+                "Early stopping: set %s - metric %s - patience %s",
+                self.early_stopping.dataset,
+                self.early_stopping.metric,
+                self.early_stopping.patience)
 
         # Loads the initial checkpoint if provided
         if self._restart_path is not None:
             self.restart_exp()
 
-        self.log_args()
-
         while self._epoch < self.max_epochs:
 
             if (self.early_stopping is not None and
-                self._beaten_epochs > self.early_stopping.patience):
+               self._beaten_epochs > self.early_stopping.patience):
                 break
 
             # -- TODO: move out
@@ -336,8 +348,8 @@ class Trainer(SacredTrainer):
 
             # -- Performs one epoch of training
             output_train = self.train_epoch(train_loader)
-            self.save_checkpoint(self._logdir, "epoch%d.ckpt" % self._epoch)
-
+            # -- Save checkpoint after every epoch
+            self.save_checkpoint()
             # -- Validate the network against the validation set
             output_val = dict()
             for kk, vv in self._val_loader.items():
@@ -357,8 +369,8 @@ class Trainer(SacredTrainer):
             else:
                 self._beaten_epochs += 1
 
-        print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self._logdir, "epoch%d.ckpt" % self._best_epoch)
+        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
+        self.load_checkpoint(self._best_epoch)
 
         if self._test_loader is not None:
             # TODO !!!
@@ -389,12 +401,13 @@ class Trainer(SacredTrainer):
         # Disable network grad while evaluating the model
         # with no_grad_ifnotscript(self.model):
         if torch.is_grad_enabled():
-            print("WARNING: You should handle no_grad by yourself for now!")
+            self.console_log.warning(
+                "You should handle no_grad by yourself for now!")
 
         # --------------------------------------------------------------------
 
         pbar = tqdm(dataloader, total=self.num_batches_val[set_name],
-                    desc=pbar_descr_prefix, **self.args.tqdm)
+                    desc=pbar_descr_prefix, **self.args.loggers.tqdm)
 
         for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)
@@ -414,9 +427,7 @@ class Trainer(SacredTrainer):
         # --------------------------------------------------------------------
 
         if logger is not None:
-            self._model.log_val(
-                self._epoch, set_name,
-                outputs.get('stats', dict()), logger)
+            self._model.log_val(set_name, outputs.get('stats', dict()))
 
         self._model.reset_val_stats()
         final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
@@ -431,8 +442,8 @@ class Trainer(SacredTrainer):
         else:
             raise ValueError("Give me the folder experiment!")
 
-        print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self._logdir, "epoch%d.ckpt" % self._best_epoch)
+        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
+        self.load_checkpoint(self._best_epoch)
 
         if self._test_loader is not None:
             output_test = self.validate(
@@ -446,17 +457,17 @@ class Trainer(SacredTrainer):
         if self._restart_path is not None:
             self.restart_exp()
         else:
-            raise ValueError("Give me the folder experiment!")
+            raise ValueError("You should specify the experiment folder!")
 
         print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self._logdir, "epoch%d.ckpt" % self._best_epoch)
+        self.load_checkpoint(self._best_epoch)
 
         out_dict = {}
         if torch.is_grad_enabled():
-            print("WARNING: You should handle no_grad by yourself for now!")
+            self.console_log.warning("You should handle no_grad by yourself for now!")
 
         pbar = tqdm(dataloader, total=self.num_batches_test,
-                    desc='test', **self.args.tqdm)
+                    desc='test', **self.args.loggers.tqdm)
 
         for batch_idx, batch in enumerate(pbar):
             device_batch = self.to_device(batch)

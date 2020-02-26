@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 import torch
+import logging
 import numpy as np
 
 from functools import reduce
@@ -11,8 +12,12 @@ from copy import deepcopy
 
 from omegaconf import OmegaConf
 from yapt.utils.trainer_utils import detach_dict, to_device
-from yapt.utils.utils import safe_mkdirs, is_dict, is_list, get_maybe_missing_args
-from yapt.core.logger.tensorboardXsafe import SummaryWriter
+from yapt.utils.utils import safe_mkdirs, is_dict, is_list, get_maybe_missing_args, flatten_dict
+from yapt.utils.debugging import IllegalArgumentError
+
+from yapt.loggers.base import LoggerDict
+from yapt.loggers.tensorboard import TensorBoardLogger
+from yapt.loggers.neptune import NeptuneLogger
 
 
 def recursive_get(_dict, *keys):
@@ -52,6 +57,10 @@ class BaseTrainer(ABC):
         return self._use_cuda
 
     @property
+    def use_amp(self):
+        return self._use_amp
+
+    @property
     def global_step(self):
         return self._global_step
 
@@ -85,14 +94,23 @@ class BaseTrainer(ABC):
                  external_logdir=None,
                  init_seeds=True):
 
+        self.console_log = logging.getLogger()
+
+        # -- Load config-arguments from files/dict/cli
         self.load_args(extra_args)
         args = self._args
 
         self._global_step = 0
         self._verbose = args.verbose
         self._use_cuda = args.cuda and torch.cuda.is_available()
+        self._use_amp = False
         self._device = torch.device("cuda" if self._use_cuda else "cpu")
-        self.print_verbose("Device: {}".format(self._device))
+        self.console_log.info("Device: %s", str(self._device))
+
+        # TODO: distributed ?
+        self.proc_rank = 0
+        self.world_size = 1
+        self.node_rank = 0
 
         # -- Init random seed
         self.init_seeds(init_seeds)
@@ -116,26 +134,67 @@ class BaseTrainer(ABC):
                 model_class.__name__. lower(),
                 self._timestring + "_%s" % args.exp_name)
 
-        self._logger = self.create_logger(external_logdir)
+        self._logger = self.configure_loggers(external_logdir)
         self.dump_args(self._logdir)
 
         # TODO: here we should handle dataparallel table and distributed mode
 
         # -- Load Model
-        # model = self.set_model() if model_class is None \
-        #     else model_class(args, logger=self._logger, device=self._device)
         model = model_class(args, logger=self._logger, device=self._device)
+
         # -- Move model to device
         self._model = model.to(self._device)
 
-    def create_logger(self, external_logdir=None):
+        # -- Make a link to trainer to access its properties from model
+        self._model.set_trainer(self)
+
+        # -- Print model summary
+        if self.proc_rank == 0:
+            self.model.summarize()
+
+    def configure_loggers(self, external_logdir=None):
         if external_logdir is not None:
             self._logdir = external_logdir
-            self.print_verbose("WARNING: external logdir {}".format(
+            self.console_log.warning("external logdir {}".format(
                 external_logdir))
 
+        args_logger = self.args.loggers
+        loggers = dict()
+
+        # default tensorboard
+        # TODO: decide if we can make it optional
         safe_mkdirs(self._logdir, exist_ok=True)
-        return SummaryWriter(log_dir=self._logdir)
+        loggers['tb'] = TensorBoardLogger(self._logdir)
+
+        # Neptune
+        if get_maybe_missing_args(args_logger, 'neptune') is not None:
+            # TODO: because of api key and sesitive data,
+            # neptune project should be per_project in a separate file
+            loggers['neptune'] = NeptuneLogger(
+                api_key=os.environ['NEPTUNE_API_TOKEN'],
+                project_name=args_logger.neptune.project_name,
+                offline_mode=args_logger.neptune.offline_mode,
+                experiment_name=self.args.exp_name,
+                params=flatten_dict(self.args),
+                properties=None,
+                tags=None,
+                logger=self.console_log
+            )
+
+        # Wrap loggers
+        loggers = LoggerDict(loggers)
+        return loggers
+
+    # def prepare_experiment(self):
+    #     # link up experiment object
+    #     if self.logger is not None:
+    #         ref_model.logger = self.logger
+
+    #         # save exp to get started
+    #         if hasattr(ref_model, "hparams"):
+    #             self.logger.log_hyperparams(ref_model.hparams)
+
+    #         self.logger.save()
 
     def get_maybe_missing_args(self, key, default=None):
         return get_maybe_missing_args(self.args, key, default)
@@ -184,8 +243,7 @@ class BaseTrainer(ABC):
         if self._cli_args.config is not None:
             self.default_config = self._cli_args.config
             del self._cli_args['config']
-            print("WARNING: override default config with: %s"
-                  % self.default_config)
+            self.console_log.warning("override default config with: %s", self.default_config)
 
         # -- 1. From experiment default config file
         self._default_config_args = OmegaConf.load(self.default_config)
@@ -200,10 +258,9 @@ class BaseTrainer(ABC):
         if is_dict(extra_args):
             matching = [s for s in extra_args.keys() if "." in s]
             if len(matching) > 0:
-                print("WARNING: it seems you are using dotted notation \
+                self.console_log.warning("It seems you are using dotted notation \
                       in a dictionary! Please use a list instead, \
-                      to modify the correct values!")
-                print(matching)
+                      to modify the correct values! %s", matching)
             self._extra_args = OmegaConf.create(extra_args)
 
         elif is_list(extra_args):
@@ -258,27 +315,27 @@ class BaseTrainer(ABC):
         OmegaConf.set_struct(self._args, True)
 
     def print_args(self):
-        print("Final args:")
-        print(self._args.pretty())
+        self.console_log.info("Final args:")
+        self.console_log.info(self._args.pretty())
 
-        print("Default YAPT args:")
-        print(self._defaults_yapt.pretty())
+        self.console_log.info("Default YAPT args:")
+        self.console_log.info(self._defaults_yapt.pretty())
 
-        print("\n\nDefault config args:")
-        print(self._default_config_args.pretty())
+        self.console_log.info("\n\nDefault config args:")
+        self.console_log.info(self._default_config_args.pretty())
 
-        print("\n\nCustom config args:")
-        print(self._custom_config_args.pretty())
+        self.console_log.info("\n\nCustom config args:")
+        self.console_log.info(self._custom_config_args.pretty())
 
-        print("\n\nExtra args:")
-        print(self._extra_args.pretty())
+        self.console_log.info("\n\nExtra args:")
+        self.console_log.info(self._extra_args.pretty())
 
-        print("\n\ncli args:")
-        print(self._cli_args.pretty())
+        self.console_log.info("\n\ncli args:")
+        self.console_log.info(self._cli_args.pretty())
 
-    def print_verbose(self, message):
-        if self._verbose:
-            print(message)
+    # def print_verbose(self, message):
+    #     if self._verbose:
+    #         print(message)
 
     def init_seeds(self, init_seeds):
         # -- This might be the case the user wants to init the seeds by himself
@@ -294,27 +351,23 @@ class BaseTrainer(ABC):
             torch.cuda.manual_seed(self._seed)
             np.random.seed(self._seed)  # Numpy module.
             # random.seed(self.seed)  # Python random module.
-            self.print_verbose("Random seed: {}".format(self._seed))
+            self.console_log.info("Random seed: %d", self._seed)
 
         if self._use_cuda and self.get_maybe_missing_args('cudnn') is not None:
             torch.backends.cudnn.benchmark = args.cudnn.benchmark
             torch.backends.cudnn.deterministic = args.cudnn.deterministic
-            self.print_verbose("cudnn.benchmark: {}".format(args.cudnn.benchmark))
-            self.print_verbose("cudnn.deterministic: {}".format(args.cudnn.deterministic))
-        self.print_verbose("")
+            self.console_log.info("cudnn.benchmark: %s", args.cudnn.benchmark)
+            self.console_log.info("cudnn.deterministic: %s", args.cudnn.deterministic)
 
     def set_data_loaders(self):
         raise NotImplementedError("Implement this method to return a dict \
                                    of dataloaders or pass it to the constructor")
 
-    # def set_model(self):
-    #     raise NotImplementedError("Implement this method to return your model \
-    #                                or pass it to the constructor")
-
     def log_args(self):
         name_str = os.path.basename(sys.argv[0])
         args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self._args).items())])[:-2]
-        self._logger.add_text("Script arguments", name_str + " -> " + args_str)
+        self._logger['tb'].experiment.add_text(
+            "Script arguments", name_str + " -> " + args_str)
 
     def dump_args(self, savedir):
         def path(name):
@@ -329,14 +382,7 @@ class BaseTrainer(ABC):
             self._custom_config_args.save(path('custom_config_args.yml'))
 
         except Exception as e:
-            print("An error occurred while args dump:")
-            print(e)
-
-    def log_gradients(self, logger, global_step):
-        for name, param in self._model.named_parameters():
-            if param.requires_grad and param.grad is not None:
-                logger.add_scalar("gradients/" + name, param.grad.norm(2).item(),
-                                  global_step=global_step)
+            self.console_log.error("An error occurred while args dump: %s", e)
 
     def to_device(self, tensor_list):
         return to_device(tensor_list, self._device)

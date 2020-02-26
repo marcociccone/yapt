@@ -7,6 +7,7 @@ from sacred import Experiment
 from sacred.observers import MongoObserver
 from sacred.utils import apply_backspaces_and_linefeeds
 from yapt import BaseTrainer
+from yapt.utils.utils import get_maybe_missing_args
 
 
 def main_ifsacred(func):
@@ -31,11 +32,17 @@ def main_ifsacred(func):
 
 class SacredTrainer(BaseTrainer):
 
+    # TODO: this is old, I think it should't be used anymore, Neptune is better suited
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         args = self.args
 
-        self.use_sacred = args.sacred.use_sacred
+        args_sacred = get_maybe_missing_args(args.loggers, 'sacred')
+        if args_sacred is None:
+            self.use_sacred = False
+        else:
+            self.use_sacred = args_sacred.use_sacred
+
         if self.use_sacred:
             self.sacred_exp = Experiment(args.exp_name)
             self.sacred_exp.captured_out_filter = apply_backspaces_and_linefeeds
@@ -43,16 +50,16 @@ class SacredTrainer(BaseTrainer):
             for source in self.get_sources():
                 self.sacred_exp.add_source_file(source)
 
-            if not args.sacred.mongodb_disable:
+            if not args_sacred.sacred.mongodb_disable:
                 url = "{0.mongodb_url}:{0.mongodb_port}".format(args)
-                if (args.sacred.mongodb_name is not None and
-                        args.sacred.mongodb_name != ''):
-                    db_name = args.sacred.mongodb_name
+                if (args_sacred.mongodb_name is not None and
+                        args_sacred.mongodb_name != ''):
+                    db_name = args_sacred.mongodb_name
                 else:
-                    db_name = args.sacred.mongodb_prefix + ''.join(filter(
+                    db_name = args_sacred.mongodb_prefix + ''.join(filter(
                         str.isalnum, args.dataset_name.lower()))
 
-                print('Connect to MongoDB@{}:{}'.format(url, db_name))
+                self.console_log.info('Connect to MongoDB@{}:{}'.format(url, db_name))
                 self.sacred_exp.observers.append(MongoObserver.create(url=url, db_name=db_name))
 
     def log_sacred_scalar(self, name, val, step):

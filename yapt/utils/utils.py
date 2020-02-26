@@ -4,7 +4,7 @@ import hashlib
 import os
 import json
 import itertools
-import torch
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,6 +13,17 @@ from textwrap import wrap
 from omegaconf import ListConfig, DictConfig
 from collections import MutableMapping
 from omegaconf import OmegaConf
+
+log = logging.getLogger(__name__)
+
+
+def add_key_dict_prefix(_dict, prefix, sep='/'):
+    # -- add prefix for each key
+    old_keys = list(_dict.keys())
+    for key in old_keys:
+        new_key = "{}{}{}".format(prefix, sep, key)
+        _dict[new_key] = _dict.pop(key)
+    return _dict
 
 
 def get_maybe_missing_args(args, key, default=None):
@@ -28,6 +39,10 @@ def is_list(obj):
 
 def is_dict(obj):
     return isinstance(obj, (dict, DictConfig))
+
+
+def is_optimizer(obj):
+    return isinstance(obj, torch.optim.Optimizer)
 
 
 def is_notebook():
@@ -52,7 +67,7 @@ def stats_to_str(stats, fmt=":.4f"):
         "stats should be a dict instead is a {}".format(type(stats))
     string = ''
     for key, val in stats.items():
-        if isinstance(val, torch.Tensor):
+        if torch.is_tensor(val):
             val = val.item()
         string += ("{}: {" + fmt + "} - ").format(key, val)
     return string
@@ -68,13 +83,14 @@ def call_counter(func):
     return helper
 
 
-def warning_not_implemented():
+def warning_not_implemented(console_log=None, level=1):
     # on first index:
     # - 0 is for the called function
     # - 1 is for the caller
-
-    name = inspect.stack()[1][3]
-    print("\nWARNING: {} method not implemented".format(name))
+    if console_log is None:
+        console_log = log
+    name = inspect.stack()[level][3]
+    console_log.warning("%s method not implemented", name)
 
 
 def flatten_dict(d, parent_key='', sep='.'):
@@ -172,8 +188,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
             torch.save(state, filename)
             break
         except IOError:
-            print("IOError: couldn't save the checkpoint after 10 trials")
-            pass
+            log.error("IOError: couldn't save the checkpoint after 10 trials")
 
     filenames = {'last': filename}
     if is_best:
@@ -185,8 +200,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
                 torch.save(state, filename_best)
                 break
             except IOError:
-                print("IOError: couldn't save the checkpoint after 10 trials")
-                pass
+                log.error("IOError: couldn't save the checkpoint after 10 trials")
 
         filenames['best'] = filename_best
     return filenames

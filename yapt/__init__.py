@@ -16,12 +16,14 @@ __homepage__ = 'https://gitlab.com/mciccone/yapt'
 __docs__ = "YAPT: Yet Another PyTorch Trainer."
 
 
-from .trainer.base_trainer import BaseTrainer
+from .trainer.base import BaseTrainer
 from .trainer.sacred_trainer import SacredTrainer
 from .trainer.trainer import Trainer
 from .trainer.tune_trainer import TuneWrapper, EarlyStoppingRule
+from .core.model import BaseModel
 
-from .core.model.base import BaseModel
+import logging as log
+log.basicConfig(level=log.INFO)
 
 __all__ = [
     'BaseTrainer',
