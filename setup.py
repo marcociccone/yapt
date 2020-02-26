@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="yapt",
     version="0.0.1",
-    author="Marco Ciccone and Marco Cannici",
+    author="Marco Ciccone",
     author_email="marco.ciccone@polimi.it",
     description="Yet Another PyTorch Trainer",
     long_description=long_description,
