@@ -17,10 +17,9 @@ loggers:
         leave: False
         disable: False
 
-   # neptune:
-   #      project_name: 'USERNAME/test'
-   #      experiment_name: 'test'
-   #      offline_mode: False
+    neptune:
+        offline_mode: False
+        project_name: 'USERNAME/test'
 
     # sacred:
     #     use_sacred: False
@@ -37,3 +36,8 @@ optimizer:
     regularizers:
         weight_decay: 0.0
 
+    scheduler:
+        name: 'cosine'
+        params:
+            eta_min: 1e-5  # min_lr
+            T_max: ${max_epochs}

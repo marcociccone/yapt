@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 
 from yapt.utils.utils import call_counter, warning_not_implemented, get_maybe_missing_args, add_key_dict_prefix, is_list
-from yapt.utils.trainer_utils import get_optimizer
+from yapt.utils.trainer_utils import get_optimizer, get_scheduler_optimizer, detach_dict, to_device
 
 
 class BaseModel(ABC, nn.Module):
@@ -93,12 +93,18 @@ class BaseModel(ABC, nn.Module):
     def training_step(self, batch, epoch, *args, **kwargs) -> dict:
         self._epoch = epoch
         outputs = self._training_step(batch, epoch, *args, **kwargs)
+        # Hopefully avoid any memory leak on gpu
+        outputs = detach_dict(outputs)
+        outputs = to_device(outputs, 'cpu')
         self._train_step += 1
         self._global_step += 1
         return outputs
 
     def validation_step(self, *args, **kwargs) -> dict:
         outputs = self._validation_step(*args, **kwargs)
+        # Hopefully avoid any memory leak on gpu
+        outputs = detach_dict(outputs)
+        outputs = to_device(outputs, 'cpu')
         self._val_step += 1
         return outputs
 
@@ -169,8 +175,22 @@ class BaseModel(ABC, nn.Module):
         return optimizer
 
     def _configure_scheduler_optimizer(self) -> dict:
-        self.warning_not_implemented()
-        return {}
+        args = self.args
+
+        args_scheduler = get_maybe_missing_args(args.optimizer, 'scheduler')
+        if args_scheduler is None:
+            return {}
+
+        scheduler_name = args_scheduler.name
+        scheduler_params = args_scheduler.params
+
+        # -- Get optimizer from args
+        scheduler_class = get_scheduler_optimizer(scheduler_name)
+
+        # -- Instantiate optimizer with specific parameters
+        scheduler = scheduler_class(
+            optimizer=self.optimizer, **scheduler_params)
+        return scheduler
 
     @abstractmethod
     def _training_step(self, batch, epoch) -> dict:

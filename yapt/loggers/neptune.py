@@ -28,9 +28,16 @@ class NeptuneLogger(LoggerBase):
     Neptune logger can be used in the online mode or offline (silent) mode.
     To log experiment data in online mode, NeptuneLogger requries an API key:
     """
-    def __init__(self, api_key=None, project_name=None, offline_mode=False,
-                experiment_name=None, upload_source_files=None,
-                 params=None, properties=None, tags=None, **kwargs):
+    def __init__(self,
+                 api_key=None,
+                 project_name=None,
+                 offline_mode=False,
+                 experiment_name=None,
+                 upload_source_files=None,
+                 params=None,
+                 properties=None,
+                 tags=None,
+                 **kwargs):
         r"""
 
         Initialize a neptune.ml logger.
@@ -149,12 +156,13 @@ class NeptuneLogger(LoggerBase):
         if self._experiment is not None:
             return self._experiment
         else:
-            self._experiment = neptune.create_experiment(name=self.experiment_name,
-                                                         params=self.params,
-                                                         properties=self.properties,
-                                                         tags=self.tags,
-                                                         upload_source_files=self.upload_source_files,
-                                                         **self._kwargs)
+            self._experiment = neptune.create_experiment(
+                name=self.experiment_name,
+                params=self.params,
+                properties=self.properties,
+                tags=self.tags,
+                upload_source_files=self.upload_source_files,
+                **self._kwargs)
         return self._experiment
 
     @rank_zero_only

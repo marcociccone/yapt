@@ -7,7 +7,7 @@ import numpy as np
 
 from itertools import cycle, islice
 
-from yapt.utils.trainer_utils import alternate_datasets, detach_dict, to_device
+from yapt.utils.trainer_utils import alternate_datasets, to_device
 from yapt.utils.utils import stats_to_str, safe_mkdirs
 from yapt.utils.utils import is_notebook, is_dict, is_optimizer
 
@@ -124,12 +124,16 @@ class Trainer(BaseTrainer):
                 self.num_batches_val[k] = len(v) if num_batches_val is None \
                     else num_batches_val
 
-        # -- get test loader len
         if self._test_loader is not None:
-            self.num_batches_test = self.get_maybe_missing_args('num_batches_test')
-            if self.num_batches_test is None:
-                self.num_batches_test = len(self._test_loader)
-            self.num_batches_val['test'] = self.num_batches_test
+            if not isinstance(self._test_loader, dict):
+                self._test_loader = {'test': self._test_loader}
+
+            # -- get test loader len
+            num_batches_test = self.get_maybe_missing_args('num_batches_test')
+            self.num_batches_test = dict()
+            for k, v in self._test_loader.items():
+                self.num_batches_test[k] = len(v) if num_batches_test is None \
+                    else num_batches_test
 
     def json_results(self, savedir, test_score):
         try:
@@ -260,11 +264,6 @@ class Trainer(BaseTrainer):
                 "optimizer should be a dict or a torch.optim.Optimizer object")
 
     def train_epoch(self, dataloader):
-        """
-        Performs one entire epoch of training
-        :param dataloader: A DataLoader object producing training samples
-        :return: a tuple (epoch_loss, epoch_accuracy)
-        """
 
         # -- Call Optimizer schedulers and track lr
         if self._epoch > 1:
@@ -284,40 +283,45 @@ class Trainer(BaseTrainer):
         pbar_descr_prefix = "ep %d (best: %d beaten: %d) - " % (
             self._epoch, self._best_epoch, self._beaten_epochs)
 
-        pbar = tqdm(dataloader, total=self.num_batches_train,
-                    desc='', **self.args.loggers.tqdm)
+        self._train_pbar = tqdm(
+            dataloader, total=self.num_batches_train,
+            desc='', **self.args.loggers.tqdm)
 
-        # -- Start epoch
-        for batch_idx, batch in enumerate(pbar):
-            device_batch = self.to_device(batch)
+        try:
+            # -- Start epoch
+            for batch_idx, batch in enumerate(self._train_pbar):
+                device_batch = self.to_device(batch)
 
-            # -- Model specific schedulers
-            self._model.custom_schedulers()
+                # -- Model specific schedulers
+                self._model.custom_schedulers()
 
-            # -- Execute a training step
-            outputs = self._model.training_step(
-                device_batch, self._epoch)
+                # -- Execute a training step
+                outputs = self._model.training_step(
+                    device_batch, self._epoch)
 
-            # -- Save output for each training step
-            self.collect_outputs(outputs)
-            self._global_step = self._model.global_step
+                # -- Save output for each training step
+                self.collect_outputs(outputs)
+                self._global_step = self._model.global_step
 
-            # -- Eventually log statistics
-            if self._global_step % self.log_every == 0:
-                self._model.log_train(outputs.get('stats', dict()))
-                self._model.log_grads()
+                # -- Eventually log statistics
+                if self._global_step % self.log_every == 0:
+                    self._model.log_train(outputs.get('stats', dict()))
+                    self._model.log_grads()
 
-            running_tqdm = outputs.get('running_tqdm', dict())
-            # pbar.set_postfix(ordered_dict=running_tqdm)
-            pbar.set_description("ep %d - %s" % (
-                self.epoch, stats_to_str(running_tqdm)))
-            pbar.update()
-            if batch_idx >= self.num_batches_train:
-                break
+                running_tqdm = outputs.get('running_tqdm', dict())
+                # self._train_pbar.set_postfix(ordered_dict=running_tqdm)
+                self._train_pbar.set_description("ep %d - %s" % (
+                    self.epoch, stats_to_str(running_tqdm)))
+                self._train_pbar.update()
+                if batch_idx >= self.num_batches_train:
+                    break
+            self._train_pbar.clear()
+            self._train_pbar.close()
+            self._epoch += 1
 
-        pbar.clear()
-        pbar.close()
-        self._epoch += 1
+        except KeyboardInterrupt:
+            self.console_log.info('Detected KeyboardInterrupt, attempting graceful shutdown...')
+            self.shutdown()
 
         # -- End Epoch
         self._model.reset_train_stats()
@@ -372,7 +376,8 @@ class Trainer(BaseTrainer):
             output_val = dict()
             for kk, vv in self._val_loader.items():
                 output_val[kk] = self.validate(
-                    vv, set_name=kk, logger=self._logger)
+                    vv, self.num_batches_val[kk],
+                    set_name=kk, logger=self._logger)
             print("")
 
             is_best_epoch, best_score = self._model.early_stopping(
@@ -391,16 +396,20 @@ class Trainer(BaseTrainer):
         self.load_checkpoint(self._best_epoch)
 
         if self._test_loader is not None:
-            # TODO !!!
-            output_test = self.validate(
-                self._test_loader, set_name="test", logger=None)
-            self.json_results(self._logdir, output_test)
+            # -- Test the network
+            output_test = dict()
+            for kk, vv in self._test_loader.items():
+                output_test[kk] = self.validate(
+                    vv, self.num_batches_test[kk],
+                    set_name=kk, logger=self._logger)
+                self.json_results(self._logdir, output_test[kk])
+            print("")
         else:
             output_test = output_val[kk]
 
         return output_test
 
-    def validate(self, dataloader, set_name="validation", logger=None):
+    def validate(self, dataloader, num_batches, set_name="validation", logger=None):
         """
         Computes the accuracy of the network against a validation set
         :param dataloader: A DataLoader object producing validation/test samples
@@ -424,23 +433,25 @@ class Trainer(BaseTrainer):
 
         # --------------------------------------------------------------------
 
-        pbar = tqdm(dataloader, total=self.num_batches_val[set_name],
-                    desc=pbar_descr_prefix, **self.args.loggers.tqdm)
+        self._val_pbar = tqdm(
+            dataloader, total=num_batches,
+            desc=pbar_descr_prefix, **self.args.loggers.tqdm)
 
-        for batch_idx, batch in enumerate(pbar):
+        for batch_idx, batch in enumerate(self._val_pbar):
             device_batch = self.to_device(batch)
             outputs = self._model.validation_step(device_batch, self._epoch)
 
             running_tqdm = outputs.get('running_tqdm', dict())
-            # pbar.set_postfix(ordered_dict=running_tqdm)
-            # pbar.set_postfix_str(stats_to_str(running_tqdm))
-            pbar.set_description(pbar_descr_prefix + stats_to_str(running_tqdm))
-            pbar.update()
-            if batch_idx >= self.num_batches_val[set_name]:
+            # self._val_pbar.set_postfix(ordered_dict=running_tqdm)
+            # self._val_pbar.set_postfix_str(stats_to_str(running_tqdm))
+            self._val_pbar.set_description(
+                pbar_descr_prefix + stats_to_str(running_tqdm))
+            self._val_pbar.update()
+            if batch_idx >= num_batches:
                 break
 
-        pbar.clear()
-        pbar.close()
+        self._val_pbar.clear()
+        self._val_pbar.close()
 
         # --------------------------------------------------------------------
 
@@ -487,10 +498,10 @@ class Trainer(BaseTrainer):
         if torch.is_grad_enabled():
             self.console_log.warning("You should handle no_grad by yourself for now!")
 
-        pbar = tqdm(dataloader, total=self.num_batches_test,
-                    desc='test', **self.args.loggers.tqdm)
+        self._test_pbar = tqdm(dataloader, total=self.num_batches_test,
+                               desc='test', **self.args.loggers.tqdm)
 
-        for batch_idx, batch in enumerate(pbar):
+        for batch_idx, batch in enumerate(self._test_pbar):
             device_batch = self.to_device(batch)
             out = self._model.test_step(device_batch)
 
@@ -502,12 +513,12 @@ class Trainer(BaseTrainer):
                     val = val.numpy()
                 out_dict.setdefault(key, []).append(val)
 
-            pbar.update()
+            self._test_pbar.update()
             if batch_idx >= self.num_batches_train:
                 break
 
-        pbar.clear()
-        pbar.close()
+        self._test_pbar.clear()
+        self._test_pbar.close()
 
         # -- Aggregate on batch dimension
         for key, val in out_dict.items():

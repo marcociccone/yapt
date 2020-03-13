@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 from torch import optim
+from torch.optim import lr_scheduler
 from collections import OrderedDict
 
 
@@ -125,6 +126,20 @@ def get_optimizer(name):
         'lbfgs': optim.LBFGS
     })
     return optimizers[name.lower()]
+
+
+def get_scheduler_optimizer(name):
+    schedulers = OrderedDict({
+        'lambda': lr_scheduler.LambdaLR,
+        'step': lr_scheduler.StepLR,
+        'multistep': lr_scheduler.MultiStepLR,
+        'exponential': lr_scheduler.ExponentialLR,
+        'cosine': lr_scheduler.CosineAnnealingLR,
+        'reduce_on_plateau': lr_scheduler.ReduceLROnPlateau,
+        'cyclic': lr_scheduler.CyclicLR,
+        'cosine_warm_restarts': lr_scheduler.CosineAnnealingWarmRestarts,
+    })
+    return schedulers[name.lower()]
 
 
 class ToTensor1D(object):

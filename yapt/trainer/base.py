@@ -149,8 +149,9 @@ class BaseTrainer(ABC):
         self._model.set_trainer(self)
 
         # -- Print model summary
-        if self.proc_rank == 0:
-            self.model.summarize()
+        # if self.proc_rank == 0:
+        #     __import__('pudb').set_trace()
+            # self.model.summarize()
 
     def configure_loggers(self, external_logdir=None):
         if external_logdir is not None:
@@ -419,4 +420,28 @@ class BaseTrainer(ABC):
         if self._args.dry_run:
             self.print_args()
         else:
-            self._fit()
+            try:
+                self._fit()
+            except KeyboardInterrupt:
+                self.console_log.info('Detected KeyboardInterrupt, attempting graceful shutdown...')
+                self.shutdown()
+            self.shutdown()
+
+    def shutdown(self, msg='success'):
+        # model = self.get_model()
+
+        if getattr(self, '_train_pbar', None) is not None:
+            self._train_pbar.close()
+        if getattr(self, '_val_pbar', None) is not None:
+            self._val_pbar.close()
+        if getattr(self, '_test_pbar', None) is not None:
+            self._test_pbar.close()
+
+        # with self.profiler.profile('on_train_end'):
+        #     model.on_train_end()
+
+        if self.logger is not None:
+            self.logger.finalize(msg)
+
+        # # summarize profile results
+        # self.profiler.describe()
