@@ -1,7 +1,11 @@
 """
 https://github.com/PyTorchLightning/pytorch-lightning/blob/master/pytorch_lightning/loggers/base.py
 """
-from abc import ABC
+import torch
+from abc import ABC, abstractmethod
+from typing import Union, Optional, Dict, Iterable, Any, Callable, List
+from argparse import Namespace
+
 from functools import wraps
 
 
@@ -25,52 +29,122 @@ class LoggerBase(ABC):
         self._rank = 0
 
     @property
-    def experiment(self):
-        raise NotImplementedError()
+    @abstractmethod
+    def experiment(self) -> Any:
+        """Return the experiment object associated with this logger"""
 
-    def log_metrics(self, metrics, step):
+    @abstractmethod
+    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
         """Record metrics.
-        :param float metric: Dictionary with metric names as keys and measured quanties as values
-        :param int|None step: Step number at which the metrics should be recorded
+        Args:
+            metrics: Dictionary with metric names as keys and measured quantities as values
+            step: Step number at which the metrics should be recorded
         """
-        raise NotImplementedError()
 
-    def log_hyperparams(self, params):
+    @staticmethod
+    def _convert_params(params: Union[Dict[str, Any], Namespace]) -> Dict[str, Any]:
+        # in case converting from namespace
+        if isinstance(params, Namespace):
+            params = vars(params)
+
+        if params is None:
+            params = {}
+
+        return params
+
+    @staticmethod
+    def _flatten_dict(params: Dict[str, Any], delimiter: str = '/') -> Dict[str, Any]:
+        """Flatten hierarchical dict e.g. {'a': {'b': 'c'}} -> {'a/b': 'c'}.
+        Args:
+            params: Dictionary contains hparams
+            delimiter: Delimiter to express the hierarchy. Defaults to '/'.
+        Returns:
+            Flatten dict.
+        Examples:
+            >>> LightningLoggerBase._flatten_dict({'a': {'b': 'c'}})
+            {'a/b': 'c'}
+            >>> LightningLoggerBase._flatten_dict({'a': {'b': 123}})
+            {'a/b': 123}
+        """
+
+        def _dict_generator(input_dict, prefixes=None):
+            prefixes = prefixes[:] if prefixes else []
+            if isinstance(input_dict, dict):
+                for key, value in input_dict.items():
+                    if isinstance(value, (dict, Namespace)):
+                        value = vars(value) if isinstance(value, Namespace) else value
+                        for d in _dict_generator(value, prefixes + [key]):
+                            yield d
+                    else:
+                        yield prefixes + [key, value if value is not None else str(None)]
+            else:
+                yield prefixes + [input_dict if input_dict is None else str(input_dict)]
+
+        return {delimiter.join(keys): val for *keys, val in _dict_generator(params)}
+
+    @staticmethod
+    def _sanitize_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Returns params with non-primitvies converted to strings for logging
+        >>> params = {"float": 0.3,
+        ...           "int": 1,
+        ...           "string": "abc",
+        ...           "bool": True,
+        ...           "list": [1, 2, 3],
+        ...           "namespace": Namespace(foo=3),
+        ...           "layer": torch.nn.BatchNorm1d}
+        >>> import pprint
+        >>> pprint.pprint(LightningLoggerBase._sanitize_params(params))  # doctest: +NORMALIZE_WHITESPACE
+        {'bool': True,
+         'float': 0.3,
+         'int': 1,
+         'layer': "<class 'torch.nn.modules.batchnorm.BatchNorm1d'>",
+         'list': '[1, 2, 3]',
+         'namespace': 'Namespace(foo=3)',
+         'string': 'abc'}
+        """
+        return {k: v if type(v) in [bool, int, float, str, torch.Tensor] else str(v) for k, v in params.items()}
+
+    @abstractmethod
+    def log_hyperparams(self, params: Namespace):
         """Record hyperparameters.
-        :param params: argparse.Namespace containing the hyperparameters
+        Args:
+            params: argparse.Namespace containing the hyperparameters
         """
-        raise NotImplementedError()
 
-    def save(self):
+    def save(self) -> None:
         """Save log data."""
+        pass
 
-    def finalize(self, status):
+    def finalize(self, status: str) -> None:
         """Do any processing that is necessary to finalize an experiment.
-        :param status: Status that the experiment finished with (e.g. success, failed, aborted)
+        Args:
+            status: Status that the experiment finished with (e.g. success, failed, aborted)
         """
+        pass
 
-    def close(self):
+    def close(self) -> None:
         """Do any cleanup that is necessary to close an experiment."""
+        pass
 
     @property
-    def rank(self):
+    def rank(self) -> int:
         """Process rank. In general, metrics should only be logged by the process with rank 0."""
         return self._rank
 
     @rank.setter
-    def rank(self, value):
+    def rank(self, value: int) -> None:
         """Set the process rank."""
         self._rank = value
 
     @property
-    def name(self):
+    @abstractmethod
+    def name(self) -> str:
         """Return the experiment name."""
-        raise NotImplementedError("Sub-classes must provide a name property")
 
     @property
-    def version(self):
+    @abstractmethod
+    def version(self) -> Union[int, str]:
         """Return the experiment version."""
-        raise NotImplementedError("Sub-classes must provide a version property")
 
 
 class LoggerList():
@@ -86,6 +160,9 @@ class LoggerList():
                 "%s idx is not a logger!" % idx
         self._loggers = loggers
 
+    def __getitem__(self, index):
+        return self._loggers[index]
+
     @property
     def loggers(self):
         return self._loggers
@@ -97,6 +174,33 @@ class LoggerList():
         """
         for logger in self._loggers:
             logger.log_metrics(metrics, step)
+
+    def log_artifact(self, artifact: str, destination: Optional[str] = None) -> None:
+        """Save an artifact (file) in storage (if the logger allows it)
+
+        Args:
+            artifact: A path to the file in local filesystem.
+            destination: Optional default None. A destination path.
+                If None is passed, an artifact file name will be used.
+        """
+        for logger in self._loggers:
+            log_fn = getattr(logger, "log_artifact", None)
+            if callable(log_fn) is not None:
+                log_fn(artifact, destination)
+
+    def log_image(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
+        """Log image data if the logger allows it.
+
+        Args:
+            log_name: The name of log, i.e. bboxes, visualisations, sample_images.
+            image (str|PIL.Image|matplotlib.figure.Figure): The value of the log (data-point).
+                Can be one of the following types: PIL image, matplotlib.figure.Figure, path to image file (str)
+            step: Step number at which the metrics should be recorded, must be strictly increasing
+        """
+        for logger in self._loggers:
+            log_fn = getattr(logger, "log_image", None)
+            if callable(log_fn) is not None:
+                log_fn(log_name, image, step)
 
     def log_hyperparams(self, params):
         """Record hyperparameters.
@@ -163,6 +267,9 @@ class LoggerDict():
             assert isinstance(logger, LoggerBase), \
                 "%s key is not a logger!" % key
         self._loggers = loggers
+
+    def __getitem__(self, key):
+        return self._loggers[key]
 
     @property
     def loggers(self):

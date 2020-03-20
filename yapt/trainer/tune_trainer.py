@@ -7,10 +7,10 @@ from abc import abstractmethod
 from yapt import Trainer
 from yapt.utils.utils import flatten_dict, is_dict
 from yapt.core.model import BaseModel
+from yapt import _logger
+
 from ray import tune
 from ray.tune.schedulers.trial_scheduler import FIFOScheduler, TrialScheduler
-
-logger = logging.getLogger(__name__)
 
 
 class TuneWrapper(tune.Trainable):
@@ -50,10 +50,11 @@ class TuneWrapper(tune.Trainable):
         # -- Validate over all datasets
         val_outputs_flat = OrderedDict()
         for key_loader, val_loader in self._runner.val_loader.items():
-
+            num_batches = self._runner.num_batches_val[key_loader]
             # -- Validation on val_loader
             outputs = self._runner.validate(
-                val_loader, set_name=key_loader, logger=self._runner.logger)
+                val_loader, num_batches=num_batches,
+                set_name=key_loader, logger=self._runner.logger)
 
             # -- TODO: flatten_Dict should not be necessary,
             # -- prefix key is already concatenated in validate method
@@ -136,11 +137,11 @@ class EarlyStoppingRule(FIFOScheduler):
         else:
             self._beaten[trial] += 1
 
-        logger.debug("\nEarlyStoppingRule trial {}: patience {} beaten {} result {} best {}".format(
+        _logger.debug("\nEarlyStoppingRule trial {}: patience {} beaten {} result {} best {}".format(
             trial, self._patience, self._beaten[trial], result[self._metric], best_result))
 
         if self._beaten[trial] > self._patience:
-            logger.debug("\nEarlyStoppingRule: early stopping {}".format(trial))
+            _logger.debug("\nEarlyStoppingRule: early stopping {}".format(trial))
             if self._hard_stop:
                 return TrialScheduler.STOP
             else:

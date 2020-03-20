@@ -300,7 +300,7 @@ class Trainer(BaseTrainer):
                     device_batch, self._epoch)
 
                 # -- Save output for each training step
-                self.collect_outputs(outputs)
+                # self.collect_outputs(outputs)
                 self._global_step = self._model.global_step
 
                 # -- Eventually log statistics
@@ -325,7 +325,8 @@ class Trainer(BaseTrainer):
 
         # -- End Epoch
         self._model.reset_train_stats()
-        final_tqdm = self.outputs_train[-1][-1].get('final_tqdm', dict())
+        # final_tqdm = self.outputs_train[-1][-1].get('final_tqdm', dict())
+        final_tqdm = outputs.get('final_tqdm', dict())
         print(pbar_descr_prefix + stats_to_str(final_tqdm))
         return self.outputs_train[-1]
 

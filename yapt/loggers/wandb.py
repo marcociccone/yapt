@@ -1,23 +1,24 @@
 r"""
 
 .. _wandb:
-https://github.com/PyTorchLightning/pytorch-lightning/blob/a5f159b2c7cdecce01a7da5445c89c5ee331310a/pytorch_lightning/loggers/wandb.py
 
 WandbLogger
 -------------
 """
-import argparse
 import os
-from typing import Optional, List, Dict
+from argparse import Namespace
+from typing import Optional, List, Dict, Union, Any
+
+import torch.nn as nn
 
 try:
     import wandb
     from wandb.wandb_run import Run
-except ImportError:
-    raise ImportError('You want to use `wandb` logger which is not installed yet,'
-                      ' please install it e.g. `pip install wandb`.')
+except ImportError:  # pragma: no-cover
+    raise ImportError('You want to use `wandb` logger which is not installed yet,'  # pragma: no-cover
+                      ' install it with `pip install wandb`.')
 
-from .base import LoggerBase, rank_zero_only
+from yapt.loggers.base import LoggerBase, rank_zero_only
 
 
 class WandbLogger(LoggerBase):
@@ -44,22 +45,14 @@ class WandbLogger(LoggerBase):
         trainer = Trainer(logger=wandb_logger)
     """
 
-    def __init__(self,
-                 name: Optional[str] = None,
-                 save_dir: Optional[str] = None,
-                 offline: bool = False,
-                 id: Optional[str] = None,
-                 anonymous: bool = False,
-                 version: Optional[str] = None,
-                 project: Optional[str] = None,
-                 tags: Optional[List[str]] = None,
-                 experiment=None,
-                 entity=None):
-
+    def __init__(self, name: Optional[str] = None, save_dir: Optional[str] = None,
+                 offline: bool = False, id: Optional[str] = None, anonymous: bool = False,
+                 version: Optional[str] = None, project: Optional[str] = None,
+                 tags: Optional[List[str]] = None, experiment=None, entity=None):
         super().__init__()
         self._name = name
         self._save_dir = save_dir
-        self._anonymous = "allow" if anonymous else None
+        self._anonymous = 'allow' if anonymous else None
         self._id = version or id
         self._tags = tags
         self._project = project
@@ -88,35 +81,28 @@ class WandbLogger(LoggerBase):
           """
         if self._experiment is None:
             if self._offline:
-                os.environ["WANDB_MODE"] = "dryrun"
+                os.environ['WANDB_MODE'] = 'dryrun'
             self._experiment = wandb.init(
-                name=self._name,
-                dir=self._save_dir,
-                project=self._project,
-                anonymous=self._anonymous,
-                id=self._id,
-                resume="allow",
-                tags=self._tags,
-                entity=self._entity)
+                name=self._name, dir=self._save_dir, project=self._project, anonymous=self._anonymous,
+                id=self._id, resume='allow', tags=self._tags, entity=self._entity)
         return self._experiment
 
-    def watch(self, model, log="gradients", log_freq=100):
-        wandb.watch(model, log, log_freq)
+    def watch(self, model: nn.Module, log: str = 'gradients', log_freq: int = 100):
+        wandb.watch(model, log=log, log_freq=log_freq)
 
     @rank_zero_only
-    def log_hyperparams(self, params: argparse.Namespace):
+    def log_hyperparams(self, params: Union[Dict[str, Any], Namespace]) -> None:
+        params = self._convert_params(params)
         self.experiment.config.update(params)
 
     @rank_zero_only
-    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
-        metrics["global_step"] = step
+    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None) -> None:
+        if step is not None:
+            metrics['global_step'] = step
         self.experiment.log(metrics)
 
-    def save(self):
-        pass
-
     @rank_zero_only
-    def finalize(self, status: str = 'success'):
+    def finalize(self, status: str = 'success') -> None:
         try:
             exit_code = 0 if status == 'success' else 1
             wandb.join(exit_code)

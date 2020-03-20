@@ -388,14 +388,14 @@ class BaseTrainer(ABC):
     def to_device(self, tensor_list):
         return to_device(tensor_list, self._device)
 
-    def collect_outputs(self, outputs):
-        """
-        Collect outputs of training_step for each training epoch
-        """
-        # TODO: check this, I think it could be generalized
-        if outputs is not None and len(outputs.keys()) > 0:
-            outputs = detach_dict(outputs)
-            self.outputs_train[-1].append(outputs)
+    # def collect_outputs(self, outputs):
+    #     """
+    #     Collect outputs of training_step for each training epoch
+    #     """
+    #     # TODO: check this, I think it could be generalized
+    #     if outputs is not None and len(outputs.keys()) > 0:
+    #         outputs = detach_dict(outputs)
+    #         self.outputs_train[-1].append(outputs)
 
     def call_schedulers_optimizers(self):
 

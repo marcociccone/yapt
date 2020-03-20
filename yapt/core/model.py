@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 from yapt.utils.utils import call_counter, warning_not_implemented, get_maybe_missing_args, add_key_dict_prefix, is_list
 from yapt.utils.trainer_utils import get_optimizer, get_scheduler_optimizer, detach_dict, to_device
+from yapt import _logger
 
 
 class BaseModel(ABC, nn.Module):
@@ -15,7 +16,7 @@ class BaseModel(ABC, nn.Module):
     def __init__(self, args, logger=None, device='cpu', **kwargs):
         super().__init__(**kwargs)
 
-        self.console_log = logging.getLogger()
+        self.console_log = _logger
 
         self.args = args
         self.logger = logger
