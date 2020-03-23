@@ -135,6 +135,22 @@ class Trainer(BaseTrainer):
                 self.num_batches_test[k] = len(v) if num_batches_test is None \
                     else num_batches_test
 
+    def get_train_loader(self):
+        if self.semi_supervised:
+            if self.args.alternated_update:
+                train_loader = alternate_datasets(
+                    iter(self._train_loader['labelled']),
+                    iter(self._train_loader['unlabelled']))
+            else:
+                train_loader = zip(
+                    islice(cycle(self._train_loader['labelled']),
+                           self.num_batches_train),
+                    self._train_loader['unlabelled'])
+        else:
+            train_loader = self._train_loader['labelled']
+
+        return train_loader
+
     def json_results(self, savedir, test_score):
         try:
             json_path = os.path.join(savedir, "results.json")
@@ -355,20 +371,8 @@ class Trainer(BaseTrainer):
                self._beaten_epochs > self.early_stopping.patience):
                 break
 
-            # -- TODO: move out
-            if self.semi_supervised:
-                if self.args.alternated_update:
-                    train_loader = alternate_datasets(
-                        iter(self._train_loader['labelled']),
-                        iter(self._train_loader['unlabelled']))
-                else:
-                    train_loader = zip(
-                        islice(cycle(self._train_loader['labelled']),
-                               self.num_batches_train),
-                        self._train_loader['unlabelled'])
-            else:
-                train_loader = self._train_loader['labelled']
-
+            # -- Get loader for supervised of semi-supervised
+            train_loader = self.get_train_loader()
             # -- Performs one epoch of training
             output_train = self.train_epoch(train_loader)
             # -- Save checkpoint after every epoch
