@@ -7,7 +7,8 @@ from model import Classifier
 
 class TrainerMNIST(Trainer):
 
-    default_config = '/home/ciccone/exp/yapt/examples/mnist/mnist.yml'
+    default_config = '/exp/examples/mnist/mnist.yml'  # docker
+    # default_config = 'examples/mnist/mnist.yml'        # colab
 
     def set_data_loaders(self):
         args = self.args

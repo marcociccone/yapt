@@ -1,5 +1,12 @@
-tqdm:
-    disable: True
+loggers:
+    tqdm:
+        disable: False
+        ncols: 80
+
+    neptune:
+        project_name: 'USERNAME/PROJECTNAME'
+        experiment_name: 'test'
+        offline_mode: False
 
 cudnn:
     benchmark: False
