@@ -72,8 +72,15 @@ class TuneWrapper(tune.Trainable):
                 val_outputs_flat.update(_flat)
 
         # -- Be sure that values are scalar and not tensor
+        remove_keys = []
         for key, val in val_outputs_flat.items():
-            val_outputs_flat[key] = self._get_scalar(val)
+            if val.dim() == 0:
+                val_outputs_flat[key] = self._get_scalar(val)
+            else:
+                remove_keys.append(key)
+
+        for key in remove_keys:
+            del val_outputs_flat[key]
 
         return val_outputs_flat
 
