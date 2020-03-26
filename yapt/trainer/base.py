@@ -18,6 +18,7 @@ from yapt.utils.debugging import IllegalArgumentError
 from yapt.loggers.base import LoggerDict
 from yapt.loggers.tensorboard import TensorBoardLogger
 from yapt.loggers.neptune import NeptuneLogger
+from omegaconf import ListConfig, DictConfig
 
 
 def recursive_get(_dict, *keys):
@@ -171,16 +172,22 @@ class BaseTrainer(ABC):
         if get_maybe_missing_args(args_logger, 'neptune') is not None:
             # TODO: because of api key and sesitive data,
             # neptune project should be per_project in a separate file
+
+            # TODO: THIS THIS SHOULD BE DONE FOR EACH LEAF
+            args_neptune = dict()
+            for key, val in args_logger.neptune.items():
+                if isinstance(val, ListConfig):
+                    val = list(val)
+                elif isinstance(val, DictConfig):
+                    val = dict(val)
+                args_neptune[key] = val
+
             loggers['neptune'] = NeptuneLogger(
                 api_key=os.environ['NEPTUNE_API_TOKEN'],
-                project_name=args_logger.neptune.project_name,
-                offline_mode=args_logger.neptune.offline_mode,
                 experiment_name=self.args.exp_name,
                 params=flatten_dict(self.args),
-                properties=None,
-                tags=None,
-                logger=self.console_log
-            )
+                logger=self.console_log,
+                **(args_neptune))
 
         # Wrap loggers
         loggers = LoggerDict(loggers)

@@ -20,6 +20,7 @@ loggers:
     neptune:
         offline_mode: False
         project_name: 'USERNAME/test'
+        tags: []
 
     # sacred:
     #     use_sacred: False
@@ -36,8 +37,8 @@ optimizer:
     regularizers:
         weight_decay: 0.0
 
-    scheduler:
-        name: 'cosine'
-        params:
-            eta_min: 1e-5  # min_lr
-            T_max: ${max_epochs}
+    # scheduler:
+    #     name: 'cosine'
+    #     params:
+    #         eta_min: 1e-5  # min_lr
+    #         T_max: ${max_epochs}
