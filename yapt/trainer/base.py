@@ -115,11 +115,14 @@ class BaseTrainer(ABC):
 
         # -- Init random seed
         self.init_seeds(init_seeds)
+
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
         self._restart_path = self.get_maybe_missing_args('restart_path')
+        self._use_new_dir = self.get_maybe_missing_args('use_new_dir')
         self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
-        if self._restart_path is not None and not self._args.use_new_dir:
+
+        if self._restart_path is not None and not self._use_new_dir:
             if os.path.isfile(self._restart_path):
                 self._logdir = os.path.dirname(self._restart_path)
             elif os.path.isdir(self._restart_path):
@@ -228,6 +231,27 @@ class BaseTrainer(ABC):
     #     return dict_opt_custom, dict_opt_extra
 
     def load_args(self, extra_args=None):
+        """
+        There are several ways to pass arguments via the OmegaConf interface
+
+        In general a Trainer object should have the property `default_config`
+        to set the path of the default config file containing all the training
+        arguments.
+
+        - `default_config` can be overridden via cli specifying the path
+            with the special `config` argument.
+
+        Specific arguments can be overridden by:
+
+        - `custom_config` file, defined via cli.
+        - `extra_args` dict passed to the constructor of the Trainer object.
+        - via command line using the dotted notation.
+
+        The arguments should already defined in the default_config, otherwise
+        an exception is raised since you are trying to modify an argument that
+        does not exist.
+        """
+
         # retrieve module path
         dir_path = os.path.dirname(os.path.abspath(__file__))
         dir_path = os.path.split(dir_path)[0]

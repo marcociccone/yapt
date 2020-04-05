@@ -252,7 +252,7 @@ class Trainer(BaseTrainer):
 
             _, ext = os.path.splitext(ckp_format)
             checkpoints = glob.glob(os.path.join(
-                self._restart_path, "*.{}".format(ext)))
+                self._restart_path, "*{}".format(ext)))
 
             # Sort checkpoints
             checkpoints = sorted(
@@ -483,8 +483,13 @@ class Trainer(BaseTrainer):
         self.load_checkpoint(self._best_epoch)
 
         if self._test_loader is not None:
-            output_test = self.validate(
-                self._test_loader, set_name="test", logger=None)
+            # -- Test the network
+            output_test = dict()
+            for kk, vv in self._test_loader.items():
+                output_test[kk] = self.validate(
+                    vv, self.num_batches_test[kk],
+                    set_name=kk, logger=self._logger)
+                self.json_results(self._logdir, output_test[kk])
             self.json_results(self._logdir, output_test)
             return output_test
 
