@@ -7,11 +7,10 @@ import numpy as np
 
 from itertools import cycle, islice
 
-from yapt.utils.trainer_utils import alternate_datasets, to_device
+from yapt.utils.trainer_utils import alternate_datasets, to_device, detach_dict, TensorEncoder
 from yapt.utils.utils import stats_to_str, safe_mkdirs
 from yapt.utils.utils import is_notebook, is_dict, is_optimizer
 
-# from yapt.trainer.sacred_trainer import SacredTrainer
 from yapt.trainer.base import BaseTrainer
 
 if is_notebook():
@@ -52,7 +51,15 @@ class Trainer(BaseTrainer):
 
     @property
     def checkpoints_dir(self):
-        return os.path.join(self._logdir, 'checkpoints')
+        _checkpoints_dir = os.path.join(self._logdir, 'checkpoints')
+        safe_mkdirs(_checkpoints_dir, True)
+        return _checkpoints_dir
+
+    @property
+    def results_dir(self):
+        _results_dir = os.path.join(self._logdir, 'results')
+        safe_mkdirs(_results_dir, True)
+        return _results_dir
 
     @property
     def checkpoints_format(self):
@@ -74,8 +81,6 @@ class Trainer(BaseTrainer):
         self._beaten_epochs = 0
         self.best_epoch_output_train = dict()
         self.best_epoch_output_val = dict()
-        self.outputs_train = list()
-        self.outputs_val = list()
 
         # -- Early Stopping
         self.max_epochs = args.max_epochs
@@ -151,18 +156,27 @@ class Trainer(BaseTrainer):
 
         return train_loader
 
-    def json_results(self, savedir, test_score):
+    def save_results(self, outputs, name):
         try:
-            json_path = os.path.join(savedir, "results.json")
-            results = {'global_step': self._global_step,
-                       'epoch': self._epoch,
-                       'best_epoch': self._best_epoch,
-                       'beaten_epochs': self._beaten_epochs,
-                       'best_epoch_score': self._best_epoch_score,
-                       'test_score': test_score}
+            json_path = os.path.join(self.results_dir, "%s.json" % name)
 
+            results = []
+            if os.path.exists(json_path):
+                with open(json_path, 'r') as fp:
+                    results = eval(json.load(fp))
+
+            results.append([{
+                'global_step': self._global_step,
+                'epoch': self._epoch,
+                'best_epoch': self._best_epoch,
+                'beaten_epochs': self._beaten_epochs,
+                'best_epoch_score': self._best_epoch_score,
+                'outputs': outputs
+            }])
+
+            dumped = json.dumps(results, cls=TensorEncoder)
             with open(json_path, 'w') as fp:
-                json.dump(results, fp)
+                json.dump(dumped, fp)
 
         except Exception as e:
             self.console_log.error(
@@ -240,19 +254,19 @@ class Trainer(BaseTrainer):
             self._model.optimizer.load_state_dict(
                 checkpoint['optimizer_state_dict'])
 
-    def restart_exp(self):
+    def restore_exp(self):
         ckp_format = self.checkpoints_format
-        if os.path.isfile(self._restart_path):
+        if os.path.isfile(self._restore_path):
             # check if restart_path is a specific checkpoint
-            self.console_log.info("Reload checkpoint: %s", self._restart_path)
-            self.load_checkpoint(self._restart_path)
+            self.console_log.info("Reload checkpoint: %s", self._restore_path)
+            self.load_checkpoint(self._restore_path)
         else:
             # restore last one
             regex = re.compile(r'.*' + ckp_format.format('(\d+)'))
 
             _, ext = os.path.splitext(ckp_format)
             checkpoints = glob.glob(os.path.join(
-                self._restart_path, "*{}".format(ext)))
+                self._restore_path, "*{}".format(ext)))
 
             # Sort checkpoints
             checkpoints = sorted(
@@ -294,7 +308,6 @@ class Trainer(BaseTrainer):
         self._model.zero_grad()
         # Track training statistist
         self._model.init_train_stats()
-        self.outputs_train.append([])
 
         pbar_descr_prefix = "ep %d (best: %d beaten: %d) - " % (
             self._epoch, self._best_epoch, self._beaten_epochs)
@@ -344,7 +357,7 @@ class Trainer(BaseTrainer):
         # final_tqdm = self.outputs_train[-1][-1].get('final_tqdm', dict())
         final_tqdm = outputs.get('final_tqdm', dict())
         print(pbar_descr_prefix + stats_to_str(final_tqdm))
-        return self.outputs_train[-1]
+        return outputs
 
     def _fit(self):
         """
@@ -361,10 +374,6 @@ class Trainer(BaseTrainer):
                 self.early_stopping.metric,
                 self.early_stopping.patience)
 
-        # Loads the initial checkpoint if provided
-        if self._restart_path is not None:
-            self.restart_exp()
-
         while self._epoch < self.max_epochs:
 
             if (self.early_stopping is not None and
@@ -373,16 +382,21 @@ class Trainer(BaseTrainer):
 
             # -- Get loader for supervised of semi-supervised
             train_loader = self.get_train_loader()
+
             # -- Performs one epoch of training
             output_train = self.train_epoch(train_loader)
-            # -- Save checkpoint after every epoch
+
+            # -- Save checkpoint and results after every epoch
+            self.save_results(output_train, 'train')
             self.save_checkpoint()
+
             # -- Validate the network against the validation set
             output_val = dict()
             for kk, vv in self._val_loader.items():
                 output_val[kk] = self.validate(
                     vv, self.num_batches_val[kk],
                     set_name=kk, logger=self._logger)
+                self.save_results(output_val[kk], kk)
             print("")
 
             is_best_epoch, best_score = self._model.early_stopping(
@@ -407,7 +421,7 @@ class Trainer(BaseTrainer):
                 output_test[kk] = self.validate(
                     vv, self.num_batches_test[kk],
                     set_name=kk, logger=self._logger)
-                self.json_results(self._logdir, output_test[kk])
+                self.save_results(output_test[kk], kk)
             print("")
         else:
             output_test = output_val[kk]
@@ -474,8 +488,8 @@ class Trainer(BaseTrainer):
     def only_test(self):
 
         # Reload last or best epoch
-        if self._restart_path is not None:
-            self.restart_exp()
+        if self._restore_path is not None:
+            self.restore_exp()
         else:
             raise ValueError("Give me the folder experiment!")
 
@@ -489,15 +503,14 @@ class Trainer(BaseTrainer):
                 output_test[kk] = self.validate(
                     vv, self.num_batches_test[kk],
                     set_name=kk, logger=self._logger)
-                self.json_results(self._logdir, output_test[kk])
-            self.json_results(self._logdir, output_test)
+                self.save_results(output_test[kk], kk)
             return output_test
 
     def test(self, dataloader, to_numpy=True):
 
         # Load the last / best checkpoint
-        if self._restart_path is not None:
-            self.restart_exp()
+        if self._restore_path is not None:
+            self.restore_exp()
         else:
             raise ValueError("You should specify the experiment folder!")
 

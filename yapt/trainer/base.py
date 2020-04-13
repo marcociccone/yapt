@@ -26,6 +26,9 @@ def recursive_get(_dict, *keys):
 
 
 class BaseTrainer(ABC):
+    """
+
+    """
 
     default_config = None
 
@@ -98,9 +101,20 @@ class BaseTrainer(ABC):
         self.console_log = logging.getLogger()
 
         # -- Load config-arguments from files/dict/cli
-        self.load_args(extra_args)
-        args = self._args
+        self.load_args()
+        self.override_with_custom_args(extra_args)
 
+        # -- If restore_path, args are restored from args.yml
+        # default_config_args and default_yapt are not used and
+        # only extra_args, cli_args and custom_config are considered.
+        self._restore_path = self.get_maybe_missing_args('restore_path')
+        if self._restore_path is not None:
+            self._args = self.restore_args(self._restore_path)
+            # -- Override because one could want different args
+            # for multiple training stages or at test time
+            self.override_with_custom_args(extra_args)
+
+        args = self._args
         self._global_step = 0
         self._verbose = args.verbose
         self._use_cuda = args.cuda and torch.cuda.is_available()
@@ -118,26 +132,28 @@ class BaseTrainer(ABC):
 
         # -- Logging and Experiment path
         self.log_every = args.loggers.log_every
-        self._restart_path = self.get_maybe_missing_args('restart_path')
         self._use_new_dir = self.get_maybe_missing_args('use_new_dir')
         self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
 
-        if self._restart_path is not None and not self._use_new_dir:
-            if os.path.isfile(self._restart_path):
-                self._logdir = os.path.dirname(self._restart_path)
-            elif os.path.isdir(self._restart_path):
-                self._logdir = self._restart_path
+        if self._restore_path is not None and not self._use_new_dir:
+            if os.path.isfile(self._restore_path):
+                self._logdir = os.path.dirname(self._restore_path)
+            elif os.path.isdir(self._restore_path):
+                self._logdir = self._restore_path
             else:
                 raise NotImplementedError(
-                    "Restart Path %s is not a file nor a dir" %
-                    self._restart_path)
+                    "restore_path %s is not a file nor a dir" %
+                    self._restore_path)
         else:
-            self._logdir = os.path.join(
-                args.loggers.logdir,
-                args.dataset_name.lower(),
-                model_class.__name__. lower(),
-                self._timestring + "_%s" % args.exp_name)
+            if self.args.loggers.logdir == '':
+                self._logdir = os.path.join(
+                    args.loggers.logdir,
+                    args.dataset_name.lower(),
+                    model_class.__name__. lower(),
+                    self._timestring + "_%s" % args.exp_name)
+                self.args.loggers.logdir = self._logdir
 
+        # TODO: should restore exp id from neptune
         self._logger = self.configure_loggers(external_logdir)
         self.dump_args(self._logdir)
 
@@ -152,14 +168,17 @@ class BaseTrainer(ABC):
         # -- Make a link to trainer to access its properties from model
         self._model.set_trainer(self)
 
-        # -- Print model summary
-        # if self.proc_rank == 0:
-        #     __import__('pudb').set_trace()
-            # self.model.summarize()
-
     def configure_loggers(self, external_logdir=None):
+        """
+        YAPT supports logging experiments with multiple loggers at the same time.
+        By default, an experiment is logged by TensorBoardLogger.
+
+        external_logdir: if you want to override the logdir.
+            It could be useful to use the same directory used by Ray Tune.
+
+        """
         if external_logdir is not None:
-            self._logdir = external_logdir
+            self.args.loggers.logdir = self._logdir = external_logdir
             self.console_log.warning("external logdir {}".format(
                 external_logdir))
 
@@ -230,7 +249,7 @@ class BaseTrainer(ABC):
 
     #     return dict_opt_custom, dict_opt_extra
 
-    def load_args(self, extra_args=None):
+    def load_args(self):
         """
         There are several ways to pass arguments via the OmegaConf interface
 
@@ -241,6 +260,48 @@ class BaseTrainer(ABC):
         - `default_config` can be overridden via cli specifying the path
             with the special `config` argument.
 
+        """
+
+        # retrieve module path
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        dir_path = os.path.split(dir_path)[0]
+        # get all the default yaml configs with glob
+        dir_path = os.path.join(dir_path, 'configs', '*.yml')
+
+        # -- From default yapt configuration
+        self._defaults_path = {}
+        self._defaults_yapt = OmegaConf.create(dict())
+        for file in glob.glob(dir_path):
+            # split filename from path to create key and val
+            key = os.path.splitext(os.path.split(file)[1])[0]
+            self._defaults_path[key] = file
+            # parse default args
+            self._defaults_yapt = OmegaConf.merge(
+                self._defaults_yapt, OmegaConf.load(file))
+
+        # -- From command line
+        self._cli_args = OmegaConf.from_cli()
+
+        if self._cli_args.config is not None:
+            self.default_config = self._cli_args.config
+            del self._cli_args['config']
+            self.console_log.warning("override default config with: %s", self.default_config)
+
+        # -- From experiment default config file
+        self._default_config_args = OmegaConf.create(dict())
+        if self.default_config is not None:
+            self._default_config_args = OmegaConf.load(self.default_config)
+
+        # -- Merge default args
+        self._args = OmegaConf.merge(
+            self._defaults_yapt,
+            self._default_config_args)
+
+        # -- make args structured: it fails if accessing a missing key
+        OmegaConf.set_struct(self._args, True)
+
+    def override_with_custom_args(self, extra_args=None):
+        """
         Specific arguments can be overridden by:
 
         - `custom_config` file, defined via cli.
@@ -252,41 +313,16 @@ class BaseTrainer(ABC):
         does not exist.
         """
 
-        # retrieve module path
-        dir_path = os.path.dirname(os.path.abspath(__file__))
-        dir_path = os.path.split(dir_path)[0]
-        # get all the default yaml configs with glob
-        dir_path = os.path.join(dir_path, 'configs', '*.yml')
-
-        # -- 0. From default yapt configuration
-        self._defaults_path = {}
-        self._defaults_yapt = OmegaConf.create(dict())
-        for file in glob.glob(dir_path):
-            # split filename from path to create key and val
-            key = os.path.splitext(os.path.split(file)[1])[0]
-            self._defaults_path[key] = file
-            # parse default args
-            self._defaults_yapt = OmegaConf.merge(
-                self._defaults_yapt, OmegaConf.load(file))
-
-        # -- 0. From command line
+        # -- From command line
         self._cli_args = OmegaConf.from_cli()
 
-        if self._cli_args.config is not None:
-            self.default_config = self._cli_args.config
-            del self._cli_args['config']
-            self.console_log.warning("override default config with: %s", self.default_config)
-
-        # -- 1. From experiment default config file
-        self._default_config_args = OmegaConf.load(self.default_config)
-
-        # -- 2. From experiment custom config file (passed from cli)
+        # -- From experiment custom config file (passed from cli)
         self._custom_config_args = OmegaConf.create(dict())
         if self._cli_args.custom_config is not None:
             self._custom_config_args = OmegaConf.load(
                 self._cli_args.custom_config)
 
-        # -- 3. Extra config from Tune or any script
+        # -- Extra config from Tune or any script
         if is_dict(extra_args):
             matching = [s for s in extra_args.keys() if "." in s]
             if len(matching) > 0:
@@ -305,14 +341,6 @@ class BaseTrainer(ABC):
             raise ValueError("extra_args should be a list of \
                              dotted strings or a dict")
 
-        # -- 4. Merge default args
-        self._args = OmegaConf.merge(
-            self._defaults_yapt,
-            self._default_config_args)
-
-        # -- 5. make args structured: it fails if accessing a missing key
-        OmegaConf.set_struct(self._args, True)
-
         # -- Save optimizer args for later
         dict_opt_custom = deepcopy(self._custom_config_args.optimizer)
         dict_opt_extra = deepcopy(self._extra_args.optimizer)
@@ -321,7 +349,7 @@ class BaseTrainer(ABC):
         if dict_opt_extra is not None:
             del self._extra_args['optimizer']
 
-        # -- 6. override custom args, ONLY IF THEY EXISTS
+        # -- override custom args, ONLY IF THEY EXISTS
         self._args = OmegaConf.merge(
             self._args,
             self._custom_config_args,
@@ -345,6 +373,36 @@ class BaseTrainer(ABC):
         self._args = OmegaConf.merge(
             self._args, self._cli_args)
         OmegaConf.set_struct(self._args, True)
+
+    def restore_args(self, dir):
+        """
+        Restore dumped args previously saved during a run.
+        """
+        def path(name):
+            return os.path.join(dir, name)
+        return OmegaConf.load(path('args.yml'))
+
+    def dump_args(self, savedir):
+        def path(name):
+            if self._restore_path is not None and not self._use_new_dir:
+                # - we don't want to ovwewrite the previous args
+                dir = os.path.join(
+                    savedir, 'args_restore_%s' % self._timestring)
+                safe_mkdirs(dir, exist_ok=False)
+                return os.path.join(dir, name)
+            else:
+                return os.path.join(savedir, name)
+        try:
+            self._args.save(path('args.yml'))
+            # -- Just to be sure, but not really useful dumps
+            self._defaults_yapt.save(path('defaults_yapt.yml'))
+            self._cli_args.save(path('cli_args.yml'))
+            self._extra_args.save(path('extra_args.yml'))
+            self._default_config_args.save(path('default_config_args.yml'))
+            self._custom_config_args.save(path('custom_config_args.yml'))
+
+        except Exception as e:
+            self.console_log.error("An error occurred during args dump: %s", e)
 
     def print_args(self):
         self.console_log.info("Final args:")
@@ -394,27 +452,6 @@ class BaseTrainer(ABC):
     def set_data_loaders(self):
         raise NotImplementedError("Implement this method to return a dict \
                                    of dataloaders or pass it to the constructor")
-
-    def log_args(self):
-        name_str = os.path.basename(sys.argv[0])
-        args_str = "".join([("%s: %s, " % (arg, val)) for arg, val in sorted(vars(self._args).items())])[:-2]
-        self._logger['tb'].experiment.add_text(
-            "Script arguments", name_str + " -> " + args_str)
-
-    def dump_args(self, savedir):
-        def path(name):
-            return os.path.join(savedir, name)
-        try:
-            self._args.save(path('args.yml'))
-            # -- Just to be sure, but not really useful dumps
-            self._defaults_yapt.save(path('defaults_yapt.yml'))
-            self._cli_args.save(path('cli_args.yml'))
-            self._extra_args.save(path('extra_args.yml'))
-            self._default_config_args.save(path('default_config_args.yml'))
-            self._custom_config_args.save(path('custom_config_args.yml'))
-
-        except Exception as e:
-            self.console_log.error("An error occurred while args dump: %s", e)
 
     def to_device(self, tensor_list):
         return to_device(tensor_list, self._device)

@@ -1,4 +1,6 @@
+import json
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.init as init
 from torch import optim
@@ -75,7 +77,7 @@ def to_device(tensor_list, device):
         return tensor_list
 
 
-def detach_tensor(tensor_list):
+def detach_tensor(tensor_list, to_numpy=False):
     """
     Helper function to recursively detach a tensor or a list of tensors
     This should be used when storing elements that could accumulate gradients.
@@ -84,29 +86,35 @@ def detach_tensor(tensor_list):
         new_tensors = []
         for tensor in tensor_list:
             if isinstance(tensor, torch.Tensor):
-                new_tensors.append(tensor.detach())
+                _new = tensor.detach()
+                if to_numpy:
+                    _new = _new.numpy()
+                new_tensors.append(_new)
             else:
-                new_tensors.append(detach_tensor(tensor))
+                new_tensors.append(detach_tensor(tensor, to_numpy))
 
         return new_tensors
 
     elif isinstance(tensor_list, torch.Tensor):
-        return tensor_list.detach()
+        _new = tensor_list.detach()
+        if to_numpy:
+            _new = _new.numpy()
+        return _new
 
     else:
         return tensor_list
 
 
-def detach_dict(dict_tensor):
+def detach_dict(dict_tensor, to_numpy=False):
     """
     Helper function to recursively detach a dictionary of tensors
     This should be used when storing elements that could accumulate gradients.
     """
     for key, val in dict_tensor.items():
         if isinstance(val, dict):
-            dict_tensor[key] = detach_dict(val)
+            dict_tensor[key] = detach_dict(val, to_numpy)
         else:
-            dict_tensor[key] = detach_tensor(val)
+            dict_tensor[key] = detach_tensor(val, to_numpy)
 
     return dict_tensor
 
@@ -184,8 +192,31 @@ class DisableGradNotScriptContext:
         if not self.script:
             self.context.__exit__(*args)
 
+
 # Rename class for convenience
 no_grad_ifnotscript = DisableGradNotScriptContext
+
+
+class TensorEncoder(json.JSONEncoder):
+    """ Special json encoder for numpy types """
+    def default(self, obj):
+        if isinstance(obj, (
+          np.int_, np.intc, np.intp, np.int8,
+          np.int16, np.int32, np.int64, np.uint8,
+          np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+
+        elif isinstance(obj, (
+          np.float_, np.float16, np.float32, np.float64)):
+            return float(obj)
+
+        elif isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+
+        elif isinstance(obj, (torch.Tensor,)):
+            return obj.numpy().tolist()
+
+        return json.JSONEncoder.default(self, obj)
 
 
 # def optimizer_parameters(self, base_lr, params_mult):

@@ -5,7 +5,6 @@ loggers:
 
     neptune:
         project_name: 'USERNAME/PROJECTNAME'
-        experiment_name: 'test'
         offline_mode: False
 
 cudnn:
