@@ -7,7 +7,7 @@ verbose: True
 
 loggers:
     checkpoints_format: 'epoch_{}.pt'
-    logdir: ''
+    logdir: './logs'
     log_every: 10
     log_grads_norm: 2
 

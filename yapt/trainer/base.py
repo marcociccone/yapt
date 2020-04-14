@@ -145,13 +145,13 @@ class BaseTrainer(ABC):
                     "restore_path %s is not a file nor a dir" %
                     self._restore_path)
         else:
-            if self.args.loggers.logdir == '':
-                self._logdir = os.path.join(
-                    args.loggers.logdir,
-                    args.dataset_name.lower(),
-                    model_class.__name__. lower(),
-                    self._timestring + "_%s" % args.exp_name)
-                self.args.loggers.logdir = self._logdir
+            # TODO: this should be generalized
+            self._logdir = os.path.join(
+                args.loggers.logdir,
+                args.dataset_name.lower(),
+                model_class.__name__. lower(),
+                self._timestring + "_%s" % args.exp_name)
+            self.args.loggers.logdir = self._logdir
 
         # TODO: should restore exp id from neptune
         self._logger = self.configure_loggers(external_logdir)
@@ -215,39 +215,8 @@ class BaseTrainer(ABC):
         loggers = LoggerDict(loggers)
         return loggers
 
-    # def prepare_experiment(self):
-    #     # link up experiment object
-    #     if self.logger is not None:
-    #         ref_model.logger = self.logger
-
-    #         # save exp to get started
-    #         if hasattr(ref_model, "hparams"):
-    #             self.logger.log_hyperparams(ref_model.hparams)
-
-    #         self.logger.save()
-
     def get_maybe_missing_args(self, key, default=None):
         return get_maybe_missing_args(self.args, key, default)
-
-    # def get_modifiable_args(self, keys=[]):
-    #     # This works only on the first level
-    #     dict_opt_custom = dict()
-    #     dict_opt_extra = dict()
-    #     for key in keys:
-    #         # -- Save args for later
-    #         if not isinstance(key, (list, tuple)):
-    #             key = [key]
-    #         dict_opt_custom[key]= deepcopy(recursive_get(self._custom_config_args, key))
-    #         dict_opt_extra[key] = deepcopy(recursive_get(self._extra_args, key))
-    #         # -- Remove from dictionary
-    #         if dict_opt_custom is not None:
-    #             dc = recursive_get(self._custom_config_args, key)
-    #             del dc
-    #         if dict_opt_extra is not None:
-    #             dc = recursive_get(self._extra_args, key)
-    #             del dc
-
-    #     return dict_opt_custom, dict_opt_extra
 
     def load_args(self):
         """
@@ -455,15 +424,6 @@ class BaseTrainer(ABC):
 
     def to_device(self, tensor_list):
         return to_device(tensor_list, self._device)
-
-    # def collect_outputs(self, outputs):
-    #     """
-    #     Collect outputs of training_step for each training epoch
-    #     """
-    #     # TODO: check this, I think it could be generalized
-    #     if outputs is not None and len(outputs.keys()) > 0:
-    #         outputs = detach_dict(outputs)
-    #         self.outputs_train[-1].append(outputs)
 
     def call_schedulers_optimizers(self):
 
