@@ -318,7 +318,10 @@ class Trainer(BaseTrainer):
 
         try:
             # -- Start epoch
+            outputs = None
             for batch_idx, batch in enumerate(self._train_pbar):
+                if batch_idx >= self.num_batches_train:
+                    break
                 device_batch = self.to_device(batch)
 
                 # -- Model specific schedulers
@@ -342,8 +345,7 @@ class Trainer(BaseTrainer):
                 self._train_pbar.set_description("ep %d - %s" % (
                     self.epoch, stats_to_str(running_tqdm)))
                 self._train_pbar.update()
-                if batch_idx >= self.num_batches_train:
-                    break
+
             self._train_pbar.clear()
             self._train_pbar.close()
             self._epoch += 1
@@ -354,16 +356,16 @@ class Trainer(BaseTrainer):
 
         # -- End Epoch
         self._model.reset_train_stats()
-        # final_tqdm = self.outputs_train[-1][-1].get('final_tqdm', dict())
-        final_tqdm = outputs.get('final_tqdm', dict())
-        print(pbar_descr_prefix + stats_to_str(final_tqdm))
+
+        if outputs is not None:
+            final_tqdm = outputs.get('final_tqdm', dict())
+            print(pbar_descr_prefix + stats_to_str(final_tqdm))
         return outputs
 
     def _fit(self):
         """
          A complete training procedure by performing early stopping using the provided validation set
         """
-
         self.best_epoch_output_train = dict()
         self.best_epoch_output_val = dict()
 
@@ -373,6 +375,9 @@ class Trainer(BaseTrainer):
                 self.early_stopping.dataset,
                 self.early_stopping.metric,
                 self.early_stopping.patience)
+
+        # -- Save initialized weights: it could be useful for debugging
+        self.save_checkpoint(filename=self.checkpoints_format.format('init'))
 
         while self._epoch < self.max_epochs:
 
@@ -456,7 +461,10 @@ class Trainer(BaseTrainer):
             dataloader, total=num_batches,
             desc=pbar_descr_prefix, **self.args.loggers.tqdm)
 
+        outputs = None
         for batch_idx, batch in enumerate(self._val_pbar):
+            if batch_idx >= num_batches:
+                break
             device_batch = self.to_device(batch)
             outputs = self._model.validation_step(device_batch, self._epoch)
 
@@ -466,23 +474,23 @@ class Trainer(BaseTrainer):
             self._val_pbar.set_description(
                 pbar_descr_prefix + stats_to_str(running_tqdm))
             self._val_pbar.update()
-            if batch_idx >= num_batches:
-                break
 
         self._val_pbar.clear()
         self._val_pbar.close()
 
         # --------------------------------------------------------------------
 
-        if logger is not None:
-            # NOTE: every key in outputs['stats']
-            # is modified with set_name as prefix --> validation/acc
-            # this is useful for any logger: tb, neptune, ray
-            self._model.log_val(set_name, outputs.get('stats', dict()))
-
         self._model.reset_val_stats()
-        final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
-        print("  %s - %s" % (set_name.title(), final_tqdm))
+        if outputs is not None:
+            if logger is not None:
+                # NOTE: every key in outputs['stats']
+                # is modified with set_name as prefix --> validation/acc
+                # this is useful for any logger: tb, neptune, ray
+                self._model.log_val(set_name, outputs.get('stats', dict()))
+
+            final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
+            print("  %s - %s" % (set_name.title(), final_tqdm))
+
         return outputs
 
     def only_test(self):
@@ -491,7 +499,7 @@ class Trainer(BaseTrainer):
         if self._restore_path is not None:
             self.restore_exp()
         else:
-            raise ValueError("Give me the folder experiment!")
+            raise ValueError("Experiment folder is missing!")
 
         self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
         self.load_checkpoint(self._best_epoch)
@@ -525,6 +533,8 @@ class Trainer(BaseTrainer):
                                desc='test', **self.args.loggers.tqdm)
 
         for batch_idx, batch in enumerate(self._test_pbar):
+            if batch_idx >= self.num_batches_test:
+                break
             device_batch = self.to_device(batch)
             out = self._model.test_step(device_batch)
 
@@ -537,8 +547,6 @@ class Trainer(BaseTrainer):
                 out_dict.setdefault(key, []).append(val)
 
             self._test_pbar.update()
-            if batch_idx >= self.num_batches_train:
-                break
 
         self._test_pbar.clear()
         self._test_pbar.close()

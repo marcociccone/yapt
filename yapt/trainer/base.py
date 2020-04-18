@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import glob
 import torch
@@ -96,11 +97,13 @@ class BaseTrainer(ABC):
                  model_class,
                  extra_args=None,
                  external_logdir=None,
-                 init_seeds=True):
+                 init_seeds=True,
+                 default_config=None):
 
         self.console_log = logging.getLogger()
 
         # -- Load config-arguments from files/dict/cli
+        self.default_config = default_config
         self.load_args()
         self.override_with_custom_args(extra_args)
 
@@ -250,7 +253,6 @@ class BaseTrainer(ABC):
 
         # -- From command line
         self._cli_args = OmegaConf.from_cli()
-
         if self._cli_args.config is not None:
             self.default_config = self._cli_args.config
             del self._cli_args['config']
@@ -406,10 +408,12 @@ class BaseTrainer(ABC):
         self._seed = args.seed
 
         if self._seed != -1:
+
             torch.manual_seed(self._seed)
             torch.cuda.manual_seed(self._seed)
+            torch.cuda.manual_seed_all(self._seed)  # if you are using multi-GPU.
             np.random.seed(self._seed)  # Numpy module.
-            # random.seed(self.seed)  # Python random module.
+            random.seed(self._seed)  # Python random module.
             self.console_log.info("Random seed: %d", self._seed)
 
         if self._use_cuda and self.get_maybe_missing_args('cudnn') is not None:
