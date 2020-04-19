@@ -103,7 +103,8 @@ class BaseTrainer(ABC):
         self.console_log = logging.getLogger()
 
         # -- Load config-arguments from files/dict/cli
-        self.default_config = default_config
+        if default_config is not None:
+            self.default_config = default_config
         self.load_args()
         self.override_with_custom_args(extra_args)
 
