@@ -4,7 +4,7 @@ loggers:
         ncols: 80
 
     neptune:
-        project_name: 'USERNAME/PROJECTNAME'
+        project_name: '${env:NEPTUNE_USER}/mnist-example'
         offline_mode: False
 
 cudnn:

@@ -182,6 +182,9 @@ class BaseModel(ABC, nn.Module):
         if args_scheduler is None:
             return {}
 
+        if len(args_scheduler.keys()):
+            return {}
+
         scheduler_name = args_scheduler.name
         scheduler_params = args_scheduler.params
 

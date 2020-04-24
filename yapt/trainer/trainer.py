@@ -94,6 +94,7 @@ class Trainer(BaseTrainer):
         self._val_loader = data_loaders.get('val', None)
         self._test_loader = data_loaders.get('test', None)
         self.semi_supervised = self.args.semi_supervised
+        self.alternated_update = self.args.alternated_update
 
         if self.semi_supervised:
             assert isinstance(self._train_loader, dict), \
@@ -103,9 +104,14 @@ class Trainer(BaseTrainer):
             assert self._train_loader.get('unlabelled', None) is not None, \
                 "unlabelled dataloader is None"
 
-            self.num_batches_train = max(
-                len(self._train_loader['labelled']),
-                len(self._train_loader['unlabelled']))
+            if self.alternated_update:
+                self.num_batches_train = (
+                    len(self._train_loader['labelled']) +
+                    len(self._train_loader['unlabelled']))
+            else:
+                self.num_batches_train = max(
+                    len(self._train_loader['labelled']),
+                    len(self._train_loader['unlabelled']))
         else:
             if isinstance(self._train_loader, dict):
                 assert 'labelled' in self._train_loader.keys(), \
@@ -142,7 +148,7 @@ class Trainer(BaseTrainer):
 
     def get_train_loader(self):
         if self.semi_supervised:
-            if self.args.alternated_update:
+            if self.alternated_update:
                 train_loader = alternate_datasets(
                     iter(self._train_loader['labelled']),
                     iter(self._train_loader['unlabelled']))

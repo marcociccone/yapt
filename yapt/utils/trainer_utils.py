@@ -42,16 +42,24 @@ def normal_init(m, mean, std):
 
 
 def alternate_datasets(labelled, unlabelled):
-    num_steps = len(labelled) + len(unlabelled)
-    every = int(len(labelled) / len(unlabelled) + 1)
-    _unsup = 0
+    datasets = np.array([labelled, unlabelled])
+    is_unsup = np.array([False, True])
+    len_datasets = np.array([len(d) for d in datasets])
+    total_steps = np.sum(len_datasets)
 
-    for idx in range(num_steps):
-        if (idx % every == 1 and _unsup < len(unlabelled)):
-            _unsup += 1
-            yield (next(unlabelled), False)
+    idx_max = np.argmax(len_datasets)
+    idx_min = (idx_max + 1) % 2
+
+    every = 1 + np.ceil(len_datasets[idx_max] / len_datasets[idx_min])
+    _count_max = 0
+    _count_min = 0
+    for idx in range(total_steps):
+        if idx % every == 0 or _count_max >= len_datasets[idx_max]:
+            _count_min += 1
+            yield (next(datasets[idx_min]), is_unsup[idx_min])
         else:
-            yield (next(labelled), True)
+            _count_max += 1
+            yield (next(datasets[idx_max]), is_unsup[idx_max])
 
 
 def to_device(tensor_list, device):
