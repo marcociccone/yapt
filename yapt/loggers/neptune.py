@@ -19,6 +19,7 @@ from .base import LoggerBase, rank_zero_only
 try:
     import neptune
     from neptune.experiments import Experiment
+    from neptune.projects import Project
 except ImportError:  # pragma: no-cover
     raise ImportError('You want to use `neptune` logger which is not installed yet,'  # pragma: no-cover
                       ' install it with `pip install neptune-client`.')
@@ -30,7 +31,9 @@ class NeptuneLogger(LoggerBase):
     To log experiment data in online mode, NeptuneLogger requries an API key:
     """
 
-    def __init__(self, api_key: Optional[str] = None,
+    def __init__(self,
+                 exp_id: Optional[str] = None,
+                 api_key: Optional[str] = None,
                  project_name: Optional[str] = None,
                  close_after_fit: Optional[bool] = True,
                  offline_mode: bool = False,
@@ -195,6 +198,14 @@ class NeptuneLogger(LoggerBase):
                          project_qualified_name=self.project_name)
 
         log.info(f'NeptuneLogger was initialized in {self.mode} mode')
+
+        if exp_id is not None and exp_id != -1:
+            project = neptune.Session().get_project(
+                project_qualified_name=self.project_name)
+            self._experiment = project.get_experiments(exp_id)[0]
+        # No lazy init, I need to store the id.
+        self.exp_id = self.experiment.id
+        log.info("Neptune Experiment ID %s" % self.exp_id)
 
     def __getstate__(self):
         state = self.__dict__.copy()

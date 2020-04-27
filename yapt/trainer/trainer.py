@@ -272,7 +272,8 @@ class Trainer(BaseTrainer):
 
             _, ext = os.path.splitext(ckp_format)
             checkpoints = glob.glob(os.path.join(
-                self._restore_path, "*{}".format(ext)))
+                self._restore_path, 'checkpoints', "*{}".format(ext)))
+            checkpoints = list(filter(lambda x: 'init' not in x, checkpoints))
 
             # Sort checkpoints
             checkpoints = sorted(
@@ -382,8 +383,12 @@ class Trainer(BaseTrainer):
                 self.early_stopping.metric,
                 self.early_stopping.patience)
 
-        # -- Save initialized weights: it could be useful for debugging
-        self.save_checkpoint(filename=self.checkpoints_format.format('init'))
+        # Reload last or best epoch
+        if self._restore_path is not None:
+            self.restore_exp()
+        else:
+            # -- Save initialized weights: it could be useful for debugging
+            self.save_checkpoint(filename=self.checkpoints_format.format('init'))
 
         while self._epoch < self.max_epochs:
 

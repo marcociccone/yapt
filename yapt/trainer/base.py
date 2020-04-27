@@ -352,15 +352,17 @@ class BaseTrainer(ABC):
         """
         def path(name):
             return os.path.join(dir, name)
+
+        self.console_log.info("Restore exp args from %s" % path('args.yml'))
         return OmegaConf.load(path('args.yml'))
 
     def dump_args(self, savedir):
         def path(name):
             if self._restore_path is not None and not self._use_new_dir:
-                # - we don't want to ovwewrite the previous args
+                # - we don't want to overwrite the previous args
                 dir = os.path.join(
                     savedir, 'args_restore_%s' % self._timestring)
-                safe_mkdirs(dir, exist_ok=False)
+                safe_mkdirs(dir, exist_ok=True)
                 return os.path.join(dir, name)
             else:
                 return os.path.join(savedir, name)

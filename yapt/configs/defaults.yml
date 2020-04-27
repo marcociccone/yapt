@@ -2,6 +2,7 @@ cuda: True
 dry_run: False
 dataset_name: ''
 semi_supervised: False
+alternated_update: True
 seed: -1
 verbose: True
 
@@ -18,6 +19,7 @@ loggers:
         disable: False
 
     neptune:
+        exp_id: -1
         offline_mode: False
         project_name: 'USERNAME/test'
         tags: []
