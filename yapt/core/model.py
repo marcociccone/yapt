@@ -179,10 +179,7 @@ class BaseModel(ABC, nn.Module):
         args = self.args
 
         args_scheduler = get_maybe_missing_args(args.optimizer, 'scheduler')
-        if args_scheduler is None:
-            return {}
-
-        if len(args_scheduler.keys()):
+        if args_scheduler is None or not args_scheduler:
             return {}
 
         scheduler_name = args_scheduler.name
