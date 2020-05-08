@@ -134,6 +134,8 @@ class Trainer(BaseTrainer):
             for k, v in self._val_loader.items():
                 self.num_batches_val[k] = len(v) if num_batches_val is None \
                     else num_batches_val
+        else:
+            self._val_loader = dict()
 
         if self._test_loader is not None:
             if not isinstance(self._test_loader, dict):
@@ -145,6 +147,8 @@ class Trainer(BaseTrainer):
             for k, v in self._test_loader.items():
                 self.num_batches_test[k] = len(v) if num_batches_test is None \
                     else num_batches_test
+        else:
+            self._test_loader = dict()
 
     def get_train_loader(self):
         if self.semi_supervised:
