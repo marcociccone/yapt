@@ -98,7 +98,8 @@ class BaseTrainer(ABC):
                  extra_args=None,
                  external_logdir=None,
                  init_seeds=True,
-                 default_config=None):
+                 default_config=None,
+                 mode=None):
 
         self.console_log = logging.getLogger()
 
@@ -112,11 +113,18 @@ class BaseTrainer(ABC):
         # default_config_args and default_yapt are not used and
         # only extra_args, cli_args and custom_config are considered.
         self._restore_path = self.get_maybe_missing_args('restore_path')
+        if self._restore_path == '':
+            self._restore_path = None
+
         if self._restore_path is not None:
             self._args = self.restore_args(self._restore_path)
             # -- Override because one could want different args
             # for multiple training stages or at test time
             self.override_with_custom_args(extra_args)
+
+        # -- mode can we train or test. Can be defined from args and init
+        self.mode = self._args.mode.lower() if mode is None else mode
+        assert self.mode in ('train', 'test'), 'train or test mode only'
 
         args = self._args
         self._global_step = 0
@@ -185,6 +193,9 @@ class BaseTrainer(ABC):
             self.args.loggers.logdir = self._logdir = external_logdir
             self.console_log.warning("external logdir {}".format(
                 external_logdir))
+
+        if self.mode == 'test':
+            return None
 
         args_logger = self.args.loggers
         loggers = dict()

@@ -5,6 +5,8 @@ semi_supervised: False
 alternated_update: True
 seed: -1
 verbose: True
+restore_path: ''
+mode: 'train'
 
 loggers:
     checkpoints_format: 'epoch_{}.pt'
