@@ -7,6 +7,8 @@ seed: -1
 verbose: True
 restore_path: ''
 mode: 'train'
+validate_every: 1
+save_every: 1
 
 loggers:
     checkpoints_format: 'epoch_{}.pt'

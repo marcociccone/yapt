@@ -6,11 +6,9 @@ import torch
 import numpy as np
 
 from itertools import cycle, islice
-
-from yapt.utils.trainer_utils import alternate_datasets, to_device, detach_dict, TensorEncoder
-from yapt.utils.utils import stats_to_str, safe_mkdirs
+from yapt.utils.trainer_utils import alternate_datasets, detach_dict
+from yapt.utils.utils import stats_to_str, safe_mkdirs, timing
 from yapt.utils.utils import is_notebook, is_dict, is_optimizer
-
 from yapt.trainer.base import BaseTrainer
 
 if is_notebook():
@@ -83,6 +81,8 @@ class Trainer(BaseTrainer):
         self.best_epoch_output_val = dict()
 
         # -- Early Stopping
+        self.save_every = args.save_every
+        self.validate_every = args.validate_every
         self.max_epochs = args.max_epochs
         self.early_stopping = self.get_maybe_missing_args('early_stopping')
 
@@ -166,32 +166,27 @@ class Trainer(BaseTrainer):
 
         return train_loader
 
-    def save_results(self, outputs, name):
+    @timing
+    def save_results(self, outputs, name, idx=''):
         try:
-            json_path = os.path.join(self.results_dir, "%s.json" % name)
+            filename = os.path.join(
+                self.results_dir, "%s%s.pt" % (name, idx))
 
-            results = []
-            if os.path.exists(json_path):
-                with open(json_path, 'r') as fp:
-                    results = eval(json.load(fp))
-
-            results.append([{
+            results = {
                 'global_step': self._global_step,
                 'epoch': self._epoch,
                 'best_epoch': self._best_epoch,
                 'beaten_epochs': self._beaten_epochs,
                 'best_epoch_score': self._best_epoch_score,
                 'outputs': outputs
-            }])
-
-            dumped = json.dumps(results, cls=TensorEncoder)
-            with open(json_path, 'w') as fp:
-                json.dump(dumped, fp)
+            }
+            torch.save(results, filename)
 
         except Exception as e:
             self.console_log.error(
-                "Error occurred while saving results into JSON: %s", e)
+                "Error occurred while saving results into : %s", e)
 
+    @timing
     def save_checkpoint(self, path=None, filename=None):
         if filename is None:
             filename = self._epoch
@@ -304,6 +299,7 @@ class Trainer(BaseTrainer):
             raise ValueError(
                 "optimizer should be a dict or a torch.optim.Optimizer object")
 
+    @timing
     def train_epoch(self, dataloader):
 
         # -- Call Optimizer schedulers and track lr
@@ -357,6 +353,7 @@ class Trainer(BaseTrainer):
                     self.epoch, stats_to_str(running_tqdm)))
                 self._train_pbar.update()
 
+            self.console_log.info("Processed {} batches.".format(batch_idx))
             self._train_pbar.clear()
             self._train_pbar.close()
             self._epoch += 1
@@ -407,29 +404,32 @@ class Trainer(BaseTrainer):
             output_train = self.train_epoch(train_loader)
 
             # -- Save checkpoint and results after every epoch
-            self.save_results(output_train, 'train')
-            self.save_checkpoint()
+            if self._epoch % self.save_every == 0:
+                self.save_results(output_train, 'train', self._epoch)
+                self.save_checkpoint()
 
             # -- Validate the network against the validation set
-            output_val = dict()
-            for kk, vv in self._val_loader.items():
-                output_val[kk] = self.validate(
-                    vv, self.num_batches_val[kk],
-                    set_name=kk, logger=self._logger)
-                self.save_results(output_val[kk], kk)
-            print("")
 
-            is_best_epoch, best_score = self._model.early_stopping(
-                output_val, self.best_epoch_output_val)
+            if self._epoch % self.validate_every == 0:
+                output_val = dict()
+                for kk, vv in self._val_loader.items():
+                    output_val[kk] = self.validate(
+                        vv, self.num_batches_val[kk],
+                        set_name=kk, logger=self._logger)
+                    self.save_results(output_val[kk], kk, self.epoch)
+                print("")
 
-            if is_best_epoch or self._epoch == 1:
-                self._beaten_epochs = 0
-                self._best_epoch = self._epoch
-                self._best_epoch_score = best_score
-                self.best_epoch_output_train = output_train
-                self.best_epoch_output_val = output_val
-            else:
-                self._beaten_epochs += 1
+                is_best_epoch, best_score = self._model.early_stopping(
+                    output_val, self.best_epoch_output_val)
+
+                if is_best_epoch or self._epoch == 1:
+                    self._beaten_epochs = 0
+                    self._best_epoch = self._epoch
+                    self._best_epoch_score = best_score
+                    self.best_epoch_output_train = output_train
+                    self.best_epoch_output_val = output_val
+                else:
+                    self._beaten_epochs += 1
 
         self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
         self.load_checkpoint(self._best_epoch)
@@ -441,13 +441,14 @@ class Trainer(BaseTrainer):
                 output_test[kk] = self.validate(
                     vv, self.num_batches_test[kk],
                     set_name=kk, logger=self._logger)
-                self.save_results(output_test[kk], kk)
+                self.save_results(output_test[kk], kk, self.epoch)
             print("")
         else:
             output_test = output_val[kk]
 
         return output_test
 
+    @timing
     def validate(self, dataloader, num_batches, set_name="validation", logger=None):
         """
         Computes the accuracy of the network against a validation set
@@ -529,7 +530,7 @@ class Trainer(BaseTrainer):
                 self.save_results(output_test[kk], kk)
             return output_test
 
-    def test(self, dataloader, to_numpy=True):
+    def test(self, dataloader, num_batches, set_name="test", to_numpy=True):
 
         # Load the last / best checkpoint
         if self._restore_path is not None:
@@ -544,11 +545,11 @@ class Trainer(BaseTrainer):
         if torch.is_grad_enabled():
             self.console_log.warning("You should handle no_grad by yourself for now!")
 
-        self._test_pbar = tqdm(dataloader, total=self.num_batches_test,
-                               desc='test', **self.args.loggers.tqdm)
+        self._test_pbar = tqdm(dataloader, total=num_batches,
+                               desc=set_name, **self.args.loggers.tqdm)
 
         for batch_idx, batch in enumerate(self._test_pbar):
-            if batch_idx >= self.num_batches_test:
+            if batch_idx >= num_batches:
                 break
             device_batch = self.to_device(batch)
             out = self._model.test_step(device_batch)
@@ -556,9 +557,10 @@ class Trainer(BaseTrainer):
             # -- Append every batch
             # TODO: make it general creating a collate function
             for key, val in out.items():
-                val = val.cpu()
-                if to_numpy:
-                    val = val.numpy()
+                if torch.is_tensor(val):
+                    val = val.cpu()
+                    if to_numpy:
+                        val = val.numpy()
                 out_dict.setdefault(key, []).append(val)
 
             self._test_pbar.update()

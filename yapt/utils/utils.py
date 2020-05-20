@@ -8,6 +8,8 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 
+from functools import wraps
+from time import time
 from PIL import Image
 from textwrap import wrap
 from omegaconf import ListConfig, DictConfig
@@ -15,6 +17,17 @@ from collections import MutableMapping
 from omegaconf import OmegaConf
 
 log = logging.getLogger(__name__)
+
+
+def timing(f):
+    @wraps(f)
+    def wrap(*args, **kw):
+        ts = time()
+        result = f(*args, **kw)
+        te = time()
+        print('%r took: %2.4f sec' %  (f.__name__,te-ts))
+        return result
+    return wrap
 
 
 def add_key_dict_prefix(_dict, prefix, sep='/'):
@@ -67,9 +80,9 @@ def stats_to_str(stats, fmt=":.4f"):
         "stats should be a dict instead is a {}".format(type(stats))
     string = ''
     for key, val in stats.items():
-        if torch.is_tensor(val):
+        if torch.is_tensor(val) and val.ndim == 0:
             val = val.item()
-        string += ("{}: {" + fmt + "} - ").format(key, val)
+            string += ("{}: {" + fmt + "} - ").format(key, val)
     return string
 
 

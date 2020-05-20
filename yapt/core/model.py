@@ -6,7 +6,13 @@ from collections import OrderedDict
 
 from yapt.utils.utils import call_counter, warning_not_implemented, get_maybe_missing_args, add_key_dict_prefix, is_list
 from yapt.utils.trainer_utils import get_optimizer, get_scheduler_optimizer, detach_dict, to_device
-from yapt import _logger
+from yapt import _logger, BaseTrainer
+from yapt.loggers.base import LoggerDict
+
+
+def is_pickable(obj):
+    non_pickable = (LoggerDict, logging.Logger, BaseTrainer)
+    return not isinstance(obj, non_pickable)
 
 
 class BaseModel(ABC, nn.Module):
@@ -37,6 +43,12 @@ class BaseModel(ABC, nn.Module):
         # -- Optimizers
         self.optimizer = self.configure_optimizer()
         self.scheduler_optimizer = self.configure_scheduler_optimizer()
+        self.reset_train_stats()
+        self.reset_val_stats()
+
+    def __getstate__(self):
+        return dict((k, v) for k, v in self.__dict__.items()
+                    if is_pickable(getattr(self, k)))
 
     @property
     def _type(self):
@@ -145,12 +157,16 @@ class BaseModel(ABC, nn.Module):
 
     def log_train(self, stats: dict) -> None:
         stats = add_key_dict_prefix(stats, prefix='train', sep='/')
-        self.logger.log_metrics(stats, self._global_step)
+        # Filter out non-scalar items
+        metrics = {k: v for k, v in stats.items() if v.ndim < 2}
+        self.logger.log_metrics(metrics, self._global_step)
         # self._log_train()
 
     def log_val(self, descr: str, stats: dict) -> None:
         stats = add_key_dict_prefix(stats, prefix=descr, sep='/')
-        self.logger.log_metrics(stats, self._global_step)
+        # Filter out non-scalar items
+        metrics = {k: v for k, v in stats.items() if v.ndim < 2}
+        self.logger.log_metrics(metrics, self._global_step)
         # self._log_val()
 
     # ------------------------------------------------------------------
