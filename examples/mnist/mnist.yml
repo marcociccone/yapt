@@ -11,11 +11,10 @@ cudnn:
     benchmark: False
     deterministic: True
 
-dataset_name: 'mnist'
-datadir: './datasets'
+data:
+    dataset_name: 'mnist'
+    num_workers: 4
 start_epoch: 0
-
-num_workers: 4
 
 only_test: False
 exp_name: 'mnist_example'

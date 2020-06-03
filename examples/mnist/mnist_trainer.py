@@ -12,7 +12,7 @@ class TrainerMNIST(Trainer):
 
     def set_data_loaders(self):
         args = self.args
-        kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+        kwargs = {'num_workers': args.data.num_workers, 'pin_memory': True} if args.cuda else {}
 
         data_loaders = dict()
         data_loaders['train'] = DataLoader(

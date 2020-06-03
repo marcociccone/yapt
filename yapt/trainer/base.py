@@ -6,6 +6,7 @@ import torch
 import logging
 import numpy as np
 
+from pathlib import Path
 from functools import reduce
 from abc import ABC, abstractmethod
 from time import gmtime, strftime
@@ -54,6 +55,10 @@ class BaseTrainer(ABC):
         return self._logdir
 
     @property
+    def datadir(self):
+        return self._datadir
+
+    @property
     def timestring(self):
         return self._timestring
 
@@ -99,8 +104,11 @@ class BaseTrainer(ABC):
                  external_logdir=None,
                  init_seeds=True,
                  default_config=None,
+                 remap_args_fn=None,
                  mode=None):
 
+        # -- YAPT requires few env variables
+        self.check_empty_env_vars()
         self.console_log = logging.getLogger()
 
         # -- Load config-arguments from files/dict/cli
@@ -118,6 +126,12 @@ class BaseTrainer(ABC):
 
         if self._restore_path is not None:
             self._args = self.restore_args(self._restore_path)
+
+            # -- Sometimes args change name during development
+            # so we need to remap to new names when reloading an old model
+            if remap_args_fn is not None and callable(remap_args_fn):
+                self._args = remap_args_fn(self._args)
+
             # -- Override because one could want different args
             # for multiple training stages or at test time
             self.override_with_custom_args(extra_args)
@@ -146,6 +160,7 @@ class BaseTrainer(ABC):
         self.log_every = args.loggers.log_every
         self._use_new_dir = self.get_maybe_missing_args('use_new_dir')
         self._timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
+        self._datadir = args.data.datadir
 
         if self._restore_path is not None and not self._use_new_dir:
             if os.path.isfile(self._restore_path):
@@ -160,7 +175,7 @@ class BaseTrainer(ABC):
             # TODO: this should be generalized
             self._logdir = os.path.join(
                 args.loggers.logdir,
-                args.dataset_name.lower(),
+                args.data.dataset_name.lower(),
                 model_class.__name__. lower(),
                 self._timestring + "_%s" % args.exp_name)
             self.args.loggers.logdir = self._logdir
@@ -200,12 +215,13 @@ class BaseTrainer(ABC):
         args_logger = self.args.loggers
         loggers = dict()
 
-        # default tensorboard
-        # TODO: decide if we can make it optional
         safe_mkdirs(self._logdir, exist_ok=True)
-        loggers['tb'] = TensorBoardLogger(self._logdir)
 
-        # Neptune
+        # -- Tensorboard is not defualt anymore
+        if args_logger.tensorboard:
+            loggers['tb'] = TensorBoardLogger(self._logdir)
+
+        # -- Neptune
         if get_maybe_missing_args(args_logger, 'neptune') is not None:
             # TODO: because of api key and sesitive data,
             # neptune project should be per_project in a separate file
@@ -219,11 +235,21 @@ class BaseTrainer(ABC):
                     val = dict(val)
                 args_neptune[key] = val
 
+            # -- Recursively search for files or extensions
+            if 'upload_source_files' in args_neptune.keys():
+                source_files = [
+                    str(path) for ext in args_neptune['upload_source_files']
+                    for path in Path('./').rglob(ext)]
+                del args_neptune['upload_source_files']
+            else:
+                source_files = None
+
             loggers['neptune'] = NeptuneLogger(
                 api_key=os.environ['NEPTUNE_API_TOKEN'],
                 experiment_name=self.args.exp_name,
                 params=flatten_dict(self.args),
                 logger=self.console_log,
+                upload_source_files=source_files,
                 **(args_neptune))
 
         # Wrap loggers
@@ -232,6 +258,15 @@ class BaseTrainer(ABC):
 
     def get_maybe_missing_args(self, key, default=None):
         return get_maybe_missing_args(self.args, key, default)
+
+    def check_empty_env_vars(self):
+        # list of variables to check are not empty
+        env_vars = ['YAPT_LOGDIR', 'YAPT_DATADIR',
+                    'NEPTUNE_USER', 'NEPTUNE_API_TOKEN']
+        for key in env_vars:
+            if os.environ[key] is None:
+                self.console_log.warning(
+                    "YAPT env variable '{}' is not set".format(key))
 
     def load_args(self):
         """

@@ -1,4 +1,3 @@
-import json
 import glob
 import re
 import os
@@ -81,8 +80,8 @@ class Trainer(BaseTrainer):
         self.best_epoch_output_val = dict()
 
         # -- Early Stopping
-        self.save_every = args.save_every
-        self.validate_every = args.validate_every
+        self.save_every = args.loggers.save_every
+        self.validate_every = args.loggers.validate_every
         self.max_epochs = args.max_epochs
         self.early_stopping = self.get_maybe_missing_args('early_stopping')
 
@@ -93,8 +92,8 @@ class Trainer(BaseTrainer):
         self._train_loader = data_loaders['train']
         self._val_loader = data_loaders.get('val', None)
         self._test_loader = data_loaders.get('test', None)
-        self.semi_supervised = self.args.semi_supervised
-        self.alternated_update = self.args.alternated_update
+        self.semi_supervised = self.args.data.semi_supervised
+        self.alternated_update = self.args.data.alternated_update
 
         if self.semi_supervised:
             assert isinstance(self._train_loader, dict), \
@@ -233,9 +232,8 @@ class Trainer(BaseTrainer):
 
         path = self.checkpoints_dir
         ckp_format = self.checkpoints_format
-
         if filename is None:
-            filename = os.path.join(path, ckp_format.format(self._epoch))
+            filename = os.path.join(path, ckp_format.format(self._epoch + 1))
 
         elif isinstance(filename, int):
             filename = os.path.join(path, ckp_format.format(filename))
@@ -517,8 +515,8 @@ class Trainer(BaseTrainer):
         else:
             raise ValueError("Experiment folder is missing!")
 
-        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
-        self.load_checkpoint(self._best_epoch)
+        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch +1)
+        self.load_checkpoint(self._best_epoch + 1)
 
         if self._test_loader is not None:
             # -- Test the network
@@ -539,7 +537,7 @@ class Trainer(BaseTrainer):
             raise ValueError("You should specify the experiment folder!")
 
         print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self._best_epoch)
+        self.load_checkpoint(self._best_epoch + 1)
 
         out_dict = {}
         if torch.is_grad_enabled():

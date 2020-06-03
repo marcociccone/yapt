@@ -16,6 +16,10 @@ from omegaconf import ListConfig, DictConfig
 from collections import MutableMapping
 from omegaconf import OmegaConf
 
+from yapt import _logger, BaseTrainer
+from yapt.loggers.base import LoggerDict
+
+
 log = logging.getLogger(__name__)
 
 
@@ -25,9 +29,25 @@ def timing(f):
         ts = time()
         result = f(*args, **kw)
         te = time()
-        print('%r took: %2.4f sec' %  (f.__name__,te-ts))
+        print('%r took: %2.4f sec' %  (f.__name__, te-ts))
         return result
     return wrap
+
+
+def is_pickable(obj):
+    non_pickable = (LoggerDict, logging.Logger, BaseTrainer)
+    return not isinstance(obj, non_pickable)
+
+
+def is_scalar(x):
+    if isinstance(x, (float, int)):
+        return True
+    elif (torch.is_tensor(x) and x.ndim == 0):
+        return True
+    elif (isinstance(x, np.ndarray) and x.ndim == 0):
+        return True
+    else:
+        return False
 
 
 def add_key_dict_prefix(_dict, prefix, sep='/'):
@@ -57,6 +77,9 @@ def is_dict(obj):
 def is_optimizer(obj):
     return isinstance(obj, torch.optim.Optimizer)
 
+
+def is_dataset(obj):
+    return isinstance(obj, torch.utils.data.Dataset)
 
 def is_notebook():
     try:
@@ -120,6 +143,12 @@ def flatten_dict(d, parent_key='', sep='.'):
 def make_hash(o_dict):
     d = hashlib.sha1(json.dumps(o_dict, sort_keys=True).encode())
     return d.hexdigest()
+
+
+def hash_from_time(lenght=10):
+    hash = hashlib.sha1()
+    hash.update(str(time()).encode('utf-8'))
+    return hash.hexdigest()[:lenght]
 
 
 def reshape_parameters(named_parameters, permutation=(3, 2, 1, 0)):
