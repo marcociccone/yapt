@@ -1,14 +1,22 @@
+import logging
 import torch.nn as nn
 
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
 from yapt import _logger
+from yapt import BaseTrainer
+from yapt.loggers.base import LoggerDict
 from yapt.utils.trainer_utils import (get_optimizer, get_scheduler_optimizer,
                                       detach_dict, to_device)
 from yapt.utils.utils import (call_counter, warning_not_implemented,
                               get_maybe_missing_args, add_key_dict_prefix,
-                              is_list, is_scalar, is_pickable)
+                              is_list, is_scalar)
+
+
+def is_pickable(obj):
+    non_pickable = (LoggerDict, logging.Logger, BaseTrainer)
+    return not isinstance(obj, non_pickable)
 
 
 class BaseModel(ABC, nn.Module):

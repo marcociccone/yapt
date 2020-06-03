@@ -16,10 +16,6 @@ from omegaconf import ListConfig, DictConfig
 from collections import MutableMapping
 from omegaconf import OmegaConf
 
-from yapt import _logger, BaseTrainer
-from yapt.loggers.base import LoggerDict
-
-
 log = logging.getLogger(__name__)
 
 
@@ -32,11 +28,6 @@ def timing(f):
         print('%r took: %2.4f sec' %  (f.__name__, te-ts))
         return result
     return wrap
-
-
-def is_pickable(obj):
-    non_pickable = (LoggerDict, logging.Logger, BaseTrainer)
-    return not isinstance(obj, non_pickable)
 
 
 def is_scalar(x):
