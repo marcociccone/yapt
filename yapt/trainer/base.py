@@ -222,7 +222,8 @@ class BaseTrainer(ABC):
             loggers['tb'] = TensorBoardLogger(self._logdir)
 
         # -- Neptune
-        if get_maybe_missing_args(args_logger, 'neptune') is not None:
+        if (get_maybe_missing_args(args_logger, 'neptune') is not None and
+                len(args_logger.neptune.keys()) > 0):
             # TODO: because of api key and sesitive data,
             # neptune project should be per_project in a separate file
 

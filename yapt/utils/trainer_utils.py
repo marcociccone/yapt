@@ -3,9 +3,12 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.init as init
+
 from torch import optim
 from torch.optim import lr_scheduler
+from torch.nn.modules import activation
 from collections import OrderedDict
+from omegaconf.basecontainer import BaseContainer
 
 
 def xavier_uniform_init(m):
@@ -125,6 +128,55 @@ def detach_dict(dict_tensor, to_numpy=False):
             dict_tensor[key] = detach_tensor(val, to_numpy)
 
     return dict_tensor
+
+
+def get_activation(args):
+
+    if isinstance(args, str):
+        name = args
+        params = {}
+    elif isinstance(args, dict, BaseContainer):
+        name = args['name']
+        params = args.get('params', {})
+    else:
+        raise ValueError("Only str, dict or OmegaConf are supported")
+
+    activations = OrderedDict({
+        'relu': activation.ReLU,
+        'relu6': activation.ReLU6,
+        'rrelu': activation.RReLU,
+        'leaky_relu': activation.LeakyReLU,
+        'prelu': activation.PReLU,
+        'glu': activation.GLU,
+        'elu': activation.ELU,
+        'celu': activation.CELU,
+        'gelu': activation.GELU,
+        'selu': activation.SELU,
+        'sigmoid': activation.Sigmoid,
+        'tanh': activation.Tanh,
+        'hardtanh': activation.Hardtanh,
+        'threshold': activation.Threshold,
+        'softmax': activation.Softmax,
+        'softmax2d': activation.Softmax2d,
+        'log_softmax': activation.LogSoftmax,
+        'log_sigmoid': activation.LogSigmoid,
+        'hardshrink': activation.Hardshrink,
+        'softplus': activation.Softplus,
+        'softshrink': activation.Softshrink,
+        'multihead_attention': activation.MultiheadAttention,
+        'softsign': activation.Softsign,
+        'softmin': activation.Softmin,
+        'tanhshrink': activation.Tanhshrink,
+    })
+
+    from packaging import version
+    if version.parse(torch.__version__) >= version.parse("1.5"):
+        activations.update({
+            'hardsigmoid': activation.Hardsigmoid,
+            'hardswitch': activation.Hardswish
+        })
+
+    return activations[name.lower()](**params)
 
 
 def get_optimizer(name):
