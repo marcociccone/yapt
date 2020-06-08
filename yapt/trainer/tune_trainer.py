@@ -96,6 +96,12 @@ class TuneWrapper(tune.Trainable):
         # TODO: this has to be checked
         self._runner.load_checkpoint(checkpoint_path)
 
+    def _get_default_yapt_config(self, config):
+        default_config = config.get('default_config', None)
+        if default_config is not None:
+            del config['default_config']
+        return default_config
+
 
 class EarlyStoppingRule(FIFOScheduler):
     """Implements a simple early-stopping rule with patience
