@@ -19,6 +19,16 @@ from omegaconf import OmegaConf
 log = logging.getLogger(__name__)
 
 
+def recursive_keys(_dict):
+    keys = []
+    for k, v in _dict.items():
+        if isinstance(v, dict):
+            keys += [{k: recursive_keys(v)}]
+        else:
+            keys += [k]
+    return keys
+
+
 def timing(f):
     @wraps(f)
     def wrap(*args, **kw):

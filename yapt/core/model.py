@@ -11,7 +11,7 @@ from yapt.utils.trainer_utils import (get_optimizer, get_scheduler_optimizer,
                                       detach_dict, to_device)
 from yapt.utils.utils import (call_counter, warning_not_implemented,
                               get_maybe_missing_args, add_key_dict_prefix,
-                              is_list, is_scalar)
+                              is_list, is_scalar, recursive_keys)
 
 
 def is_pickable(obj):
@@ -31,6 +31,12 @@ class BaseModel(ABC, nn.Module):
         self.args = args
         self.logger = logger
         self.device = device
+
+        self._best_epoch = 0
+        self._best_epoch_score = 0
+        self._beaten_epochs = 0
+        self._best_stats = []
+        self._early_stop = False
 
         self._epoch = 0
         self._global_step = 0
@@ -77,6 +83,10 @@ class BaseModel(ABC, nn.Module):
     @property
     def val_step(self):
         return self._val_step
+
+    @property
+    def early_stop(self):
+        return self._early_stop
 
     # Helpers
     # --------------------------------------------------------
@@ -251,9 +261,61 @@ class BaseModel(ABC, nn.Module):
     #     if self._log_val.calls < 1:
     #         self.warning_not_implemented()
 
-    def early_stopping(self, current_stats: dict, best_stats: dict) -> bool:
-        return True, 9999
+    def early_stopping(self, current_stats: dict) -> bool:
+        args = get_maybe_missing_args(self.args, 'early_stopping')
+        if args is None:
+            # -- Do not save in best, and do not stop
+            return False, False
 
+        dataset = args.dataset
+        metric = args.metric
+        patience = args.patience
+        mode = args.mode
+        train_until_end = get_maybe_missing_args(args, 'train_until_end', False)
+        compare_op = max if mode == "max" else min
+
+        is_best = False
+        current = self._get_metric_early_stopping(current_stats)
+
+        if current is None:
+            raise ValueError(
+                "Metric {} does not exist in current_stats['{}'] \n"
+                "It contains only these keys: {}".format(
+                    metric, dataset,
+                    str(recursive_keys(current_stats))
+                )
+            )
+
+        # -- first epoch, initialize and do not stop
+        if len(self._best_stats) == 0:
+            self._best_stats.append((self.epoch, current))
+            return True, False
+
+        best = self._best_stats[-1][1]
+        if compare_op(current, best) != best:
+            self._best_stats.append((self.epoch, current))
+            self._best_epoch_score = current
+            self._best_epoch = self.epoch
+            self._beaten_epochs = 0
+            is_best = True
+        else:
+            self._beaten_epochs += 1
+
+        if self._beaten_epochs >= patience and not train_until_end:
+            self._early_stop = True
+
+        return is_best, self._early_stop
+
+    def _get_metric_early_stopping(self, current_stats):
+        dataset = self.args.early_stopping.dataset
+        metric = self.args.early_stopping.metric
+
+        if dataset not in current_stats.keys():
+            return None
+        if 'stats' not in current_stats[dataset].keys():
+            return None
+
+        return current_stats[dataset]['stats'].get(metric, None)
     # --------------------------------------------------------
 
     def summarize(self):

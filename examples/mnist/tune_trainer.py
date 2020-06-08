@@ -1,4 +1,4 @@
-import argparse
+import os
 import ray
 
 from ray import tune
@@ -7,9 +7,6 @@ from ray.tune.schedulers import ASHAScheduler
 from yapt import TuneWrapper, EarlyStoppingRule
 from mnist_trainer import TrainerMNIST
 from model import Classifier
-
-# import logging
-# logging.basicConfig(level=logging.DEBUG)
 
 
 class TuneMNIST(TuneWrapper):
@@ -21,17 +18,6 @@ class TuneMNIST(TuneWrapper):
 
 
 if __name__ == "__main__":
-
-    # Training settings
-    parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
-    parser.add_argument(
-        "--use-gpu", action="store_true", default=False, help="CUDA training")
-    parser.add_argument(
-        "--ray-address", type=str, help="The Redis address of the cluster.")
-    parser.add_argument(
-        "--smoke-test", action="store_true", help="Finish quickly for testing")
-
-    args = parser.parse_args()
 
     tune_config = {
         'dry_run': False,
@@ -47,9 +33,9 @@ if __name__ == "__main__":
 
     # -- Ray initialization and scheduler
     # -- NOTE: local_mode=True for debugging
-    ray.init(address=args.ray_address, log_to_driver=True, local_mode=True)
-    # sched = ASHAScheduler(metric="validation/acc")
-    sched = EarlyStoppingRule(metric="validation/acc", patience=10)
+    ray.init(address=None, log_to_driver=True, local_mode=True)
+    # sched = ASHAScheduler(metric="validation/y_acc")
+    sched = EarlyStoppingRule(metric="validation/y_acc", patience=10)
 
     analysis = tune.run(
         TuneMNIST,
@@ -65,8 +51,10 @@ if __name__ == "__main__":
         checkpoint_at_end=True,
         checkpoint_freq=1,
         config=tune_config,
-        local_dir='./logs/neptune'
+        local_dir=os.path.join(
+            os.environ['YAPT_LOGDIR'], 'mnist', 'tune_example')
     )
 
-    print("Best config is:", analysis.get_best_config(metric="acc"))
+    print("Best config is:",
+          analysis.get_best_config(metric="validation/y_acc"))
 

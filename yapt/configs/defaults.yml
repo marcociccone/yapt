@@ -17,6 +17,8 @@ data:
 loggers:
     logdir: '${env:YAPT_LOGDIR}'
     checkpoints_format: 'epoch_{}.pt'
+    keep_only_last_checkpoint: False
+    keep_topk_checkpoints: 5
 
     log_every: 10
     validate_every: 1

@@ -97,16 +97,16 @@ class Classifier(BaseModel):
             val_loss = self.loss(y, y_probs)
 
             y_preds = y_probs.argmax(1)
-            val_acc = torch.mean((y == y_preds).float())
+            y_acc = torch.mean((y == y_preds).float())
 
             self._val_meters['loss'].update(val_loss)
-            self._val_meters['acc'].update(val_acc)
+            self._val_meters['y_acc'].update(y_acc)
             self._val_meters['cm'].update(y, y_probs)
 
             # -- This will be logged in tensorboard
             stats = {
                 'loss': self._val_meters['loss'].avg,
-                'acc': self._val_meters['acc'].avg,
+                'y_acc': self._val_meters['y_acc'].avg,
             }
 
             output = OrderedDict({
@@ -122,31 +122,6 @@ class Classifier(BaseModel):
         self._train_meters['loss'] = AverageMeter('loss')
 
     def _reset_val_stats(self):
-        self._val_meters['acc'] = AverageMeter('acc')
+        self._val_meters['y_acc'] = AverageMeter('y_acc')
         self._val_meters['loss'] = AverageMeter('loss')
         self._val_meters['cm'] = ConfusionMatrix('cm', self.args.net_params.out_dim)
-
-    def early_stopping(self, current_stats: dict, best_stats: dict) -> bool:
-        # TODO: I don't like the way is done here, too many dictionaries
-        # Maybe this could be the default one in the BaseModel object
-
-        dataset = self.args.early_stopping.dataset
-        metric = self.args.early_stopping.metric
-
-        # -- Handle bad cases
-        if dataset == '' or dataset is None or metric == '' or metric is None:
-            return True, 9999
-        if current_stats.get(dataset, None) is None:
-            return True, 9999
-        if current_stats[dataset]['stats'].get(metric, None) is None:
-            return True, 9999
-
-        current = current_stats[dataset]['stats'][metric]
-        # -- first time
-        if best_stats.get(dataset, None) is None:
-            is_best = True
-        else:
-            best = best_stats[dataset]['stats'][metric]
-            is_best = current > best
-
-        return (is_best, current if is_best else best)

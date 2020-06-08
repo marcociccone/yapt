@@ -24,15 +24,19 @@ class Trainer(BaseTrainer):
 
     @property
     def best_epoch(self):
-        return self._best_epoch
+        return self._model._best_epoch
 
     @property
     def best_epoch_score(self):
-        return self._best_epoch_score
+        return self._model._best_epoch_score
+
+    @property
+    def best_stats(self):
+        return self._model._best_stats
 
     @property
     def beaten_epochs(self):
-        return self._beaten_epochs
+        return self._model._beaten_epochs
 
     @property
     def train_loader(self):
@@ -49,6 +53,12 @@ class Trainer(BaseTrainer):
     @property
     def checkpoints_dir(self):
         _checkpoints_dir = os.path.join(self._logdir, 'checkpoints')
+        safe_mkdirs(_checkpoints_dir, True)
+        return _checkpoints_dir
+
+    @property
+    def best_checkpoints_dir(self):
+        _checkpoints_dir = os.path.join(self.checkpoints_dir, 'best')
         safe_mkdirs(_checkpoints_dir, True)
         return _checkpoints_dir
 
@@ -72,16 +82,12 @@ class Trainer(BaseTrainer):
             if data_loaders is None else data_loaders
         self.init_data_loaders(data_loaders)
 
-        self._epoch = 1
-        self._best_epoch = 1
-        self._best_epoch_score = 0
-        self._beaten_epochs = 0
-        self.best_epoch_output_train = dict()
-        self.best_epoch_output_val = dict()
-
+        self._epoch = 0
         # -- Early Stopping
         self.save_every = args.loggers.save_every
         self.validate_every = args.loggers.validate_every
+        self.keep_only_last_checkpoint = args.loggers.keep_only_last_checkpoint
+        self.last_checkpoint = None
         self.max_epochs = args.max_epochs
         self.early_stopping = self.get_maybe_missing_args('early_stopping')
 
@@ -172,11 +178,11 @@ class Trainer(BaseTrainer):
                 self.results_dir, "%s%s.pt" % (name, idx))
 
             results = {
-                'global_step': self._global_step,
-                'epoch': self._epoch,
-                'best_epoch': self._best_epoch,
-                'beaten_epochs': self._beaten_epochs,
-                'best_epoch_score': self._best_epoch_score,
+                'global_step': self.global_step,
+                'epoch': self.epoch,
+                'best_epoch': self.best_epoch,
+                'beaten_epochs': self.beaten_epochs,
+                'best_epoch_score': self.best_epoch_score,
                 'outputs': outputs
             }
             torch.save(results, filename)
@@ -186,7 +192,7 @@ class Trainer(BaseTrainer):
                 "Error occurred while saving results into : %s", e)
 
     @timing
-    def save_checkpoint(self, path=None, filename=None):
+    def save_checkpoint(self, path=None, filename=None, is_best=False):
         if filename is None:
             filename = self._epoch
 
@@ -196,17 +202,20 @@ class Trainer(BaseTrainer):
         if path is None:
             path = self.checkpoints_dir
 
+        if is_best:
+            path = self.best_checkpoints_dir
+
         safe_mkdirs(path, exist_ok=True)
 
         try:
             filename = os.path.join(path, filename)
 
             current_state_dict = {
-                'seen': self._global_step,
+                'global_step': self._global_step,
                 'epoch': self._epoch,
-                'best_epoch': self._best_epoch,
-                'beaten_epochs': self._beaten_epochs,
-                'best_epoch_score': self._best_epoch_score,
+                'best_epoch': self.best_epoch,
+                'beaten_epochs': self.beaten_epochs,
+                'best_epoch_score': self.best_epoch_score,
                 'model_state_dict': self._model.state_dict(),
             }
 
@@ -223,17 +232,24 @@ class Trainer(BaseTrainer):
 
             torch.save(current_state_dict, filename)
 
+            # -- track filename to delete after,
+            # if keep_only_last_checkpoint is set true
+            if not is_best and 'init' not in filename:
+                self.last_checkpoint = filename
+
         except Exception as e:
             self.console_log.error(
                 "Error occurred while saving the checkpoint: %s", e)
         return filename
 
-    def load_checkpoint(self, filename=None):
+    def load_checkpoint(self, filename=None, is_best=False):
 
         path = self.checkpoints_dir
         ckp_format = self.checkpoints_format
+        if is_best:
+            path = self.best_checkpoints_dir
         if filename is None:
-            filename = os.path.join(path, ckp_format.format(self._epoch + 1))
+            filename = os.path.join(path, ckp_format.format(self._epoch))
 
         elif isinstance(filename, int):
             filename = os.path.join(path, ckp_format.format(filename))
@@ -244,9 +260,11 @@ class Trainer(BaseTrainer):
         checkpoint = torch.load(filename)
         self._global_step = checkpoint.get('global_step', checkpoint.get('seen', 0))
         self._epoch = checkpoint['epoch']
-        self._best_epoch = checkpoint['best_epoch']
-        self._beaten_epochs = checkpoint['beaten_epochs']
-        self._best_epoch_score = checkpoint['best_epoch_score']
+
+        self.best_epoch = self._model.checkpoint['best_epoch']
+        self.beaten_epochs = self._model.checkpoint['beaten_epochs']
+        self.best_epoch_score = self._model.checkpoint['best_epoch_score']
+
         self._model.load_state_dict(checkpoint['model_state_dict'])
 
         if is_dict(self._model.optimizer):
@@ -278,6 +296,32 @@ class Trainer(BaseTrainer):
             last_checkpoint = checkpoints[-1]
             self.console_log.info("Reload checkpoint: %s", last_checkpoint)
             self.load_checkpoint(last_checkpoint)
+
+    def save_last_checkpoint(self):
+        last_checkpoint = self.last_checkpoint
+        self.save_checkpoint()
+        if self.keep_only_last_checkpoint and last_checkpoint is not None:
+            try:
+                os.remove(last_checkpoint)
+            except OSError:
+                pass
+
+    def clean_best_checkpoints(self):
+        # -- keep only topk best performing checkpoints
+        topk = self.args.loggers.keep_topk_checkpoints
+        for el in self.best_stats[:-topk]:
+            filename = os.path.join(
+                self.best_checkpoints_dir,
+                self.checkpoints_format.format(el[0]))
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
+    def save_best_checkpoint(self, is_best):
+        if is_best:
+            self.save_checkpoint(is_best=True)
+            self.clean_best_checkpoints()
 
     def log_each_epoch(self):
         # -- TODO: add anything else to be logged here
@@ -315,7 +359,7 @@ class Trainer(BaseTrainer):
         self._model.init_train_stats()
 
         pbar_descr_prefix = "ep %d (best: %d beaten: %d) - " % (
-            self._epoch, self._best_epoch, self._beaten_epochs)
+            self._epoch, self.best_epoch, self.beaten_epochs)
 
         self._train_pbar = tqdm(
             dataloader, total=self.num_batches_train,
@@ -354,7 +398,6 @@ class Trainer(BaseTrainer):
             self.console_log.info("Processed {} batches.".format(batch_idx))
             self._train_pbar.clear()
             self._train_pbar.close()
-            self._epoch += 1
 
         except KeyboardInterrupt:
             self.console_log.info('Detected KeyboardInterrupt, attempting graceful shutdown...')
@@ -372,15 +415,15 @@ class Trainer(BaseTrainer):
         """
          A complete training procedure by performing early stopping using the provided validation set
         """
-        self.best_epoch_output_train = dict()
-        self.best_epoch_output_val = dict()
 
         if self.early_stopping is not None:
             self.console_log.info(
-                "Early stopping: set %s - metric %s - patience %s",
+                "Early stopping: set %s - metric %s - patience %s - mode %s",
                 self.early_stopping.dataset,
                 self.early_stopping.metric,
-                self.early_stopping.patience)
+                self.early_stopping.patience,
+                self.early_stopping.mode
+            )
 
         # Reload last or best epoch
         if self._restore_path is not None:
@@ -391,8 +434,9 @@ class Trainer(BaseTrainer):
 
         while self._epoch < self.max_epochs:
 
-            if (self.early_stopping is not None and
-               self._beaten_epochs > self.early_stopping.patience):
+            self._epoch += 1
+            # -- If patience has been reached
+            if self._model.early_stop:
                 break
 
             # -- Get loader for supervised of semi-supervised
@@ -404,10 +448,9 @@ class Trainer(BaseTrainer):
             # -- Save checkpoint and results after every epoch
             if self._epoch % self.save_every == 0:
                 self.save_results(output_train, 'train', self._epoch)
-                self.save_checkpoint()
+                self.save_last_checkpoint()
 
-            # -- Validate the network against the validation set
-
+            # -- Validate the model against the validation set
             if self._epoch % self.validate_every == 0:
                 output_val = dict()
                 for kk, vv in self._val_loader.items():
@@ -417,20 +460,12 @@ class Trainer(BaseTrainer):
                     self.save_results(output_val[kk], kk, self.epoch)
                 print("")
 
-                is_best_epoch, best_score = self._model.early_stopping(
-                    output_val, self.best_epoch_output_val)
+                is_best, best_score = self._model.early_stopping(
+                    output_val)
+                self.save_best_checkpoint(is_best)
 
-                if is_best_epoch or self._epoch == 1:
-                    self._beaten_epochs = 0
-                    self._best_epoch = self._epoch
-                    self._best_epoch_score = best_score
-                    self.best_epoch_output_train = output_train
-                    self.best_epoch_output_val = output_val
-                else:
-                    self._beaten_epochs += 1
-
-        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch)
-        self.load_checkpoint(self._best_epoch)
+        self.console_log.info("Reloading best epoch %d ", self.best_epoch)
+        self.load_checkpoint(self.best_epoch, is_best=True)
 
         if self._test_loader is not None:
             # -- Test the network
@@ -515,8 +550,8 @@ class Trainer(BaseTrainer):
         else:
             raise ValueError("Experiment folder is missing!")
 
-        self.console_log.info("Reloading best epoch %d checkpoint", self._best_epoch +1)
-        self.load_checkpoint(self._best_epoch + 1)
+        self.console_log.info("Reloading best epoch %d checkpoint", self.best_epoch)
+        self.load_checkpoint(self.best_epoch, is_best=True)
 
         if self._test_loader is not None:
             # -- Test the network
@@ -537,7 +572,7 @@ class Trainer(BaseTrainer):
             raise ValueError("You should specify the experiment folder!")
 
         print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self._best_epoch + 1)
+        self.load_checkpoint(self.best_epoch, is_best=True)
 
         out_dict = {}
         if torch.is_grad_enabled():

@@ -13,9 +13,10 @@ cudnn:
 
 data:
     dataset_name: 'mnist'
-    num_workers: 4
-start_epoch: 0
+    num_workers: 1
+    pin_memory: True
 
+start_epoch: 0
 only_test: False
 exp_name: 'mnist_example'
 
@@ -40,7 +41,8 @@ optimizer:
 early_stopping:
     patience: 10
     dataset: 'validation'
-    metric: 'val_acc'
+    metric: 'validation/y_acc'
+    mode: 'max'
 
 input_dims: [1, 28, 28]
 

@@ -12,16 +12,17 @@ class TrainerMNIST(Trainer):
 
     def set_data_loaders(self):
         args = self.args
-        kwargs = {'num_workers': args.data.num_workers, 'pin_memory': True} if args.cuda else {}
+        kwargs = {'num_workers': args.data.num_workers,
+                  'pin_memory': args.data.pin_memory} if args.cuda else {}
 
         data_loaders = dict()
         data_loaders['train'] = DataLoader(
-            datasets.MNIST(args.datadir, train=True, download=True,
+            datasets.MNIST(args.data.datadir, train=True, download=True,
                            transform=transforms.ToTensor()),
             batch_size=args.batch_size, shuffle=True, **kwargs)
 
         data_loaders['val'] = data_loaders['test'] = DataLoader(
-            datasets.MNIST(args.datadir, train=False,
+            datasets.MNIST(args.data.datadir, train=False,
                            transform=transforms.ToTensor()),
             batch_size=args.batch_size, shuffle=False, **kwargs)
 
