@@ -32,7 +32,7 @@ class BaseModel(ABC, nn.Module):
         self.logger = logger
         self.device = device
 
-        self._best_epoch = 0
+        self._best_epoch = -1
         self._best_epoch_score = 0
         self._beaten_epochs = 0
         self._best_stats = []

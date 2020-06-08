@@ -183,6 +183,7 @@ class Trainer(BaseTrainer):
                 'best_epoch': self.best_epoch,
                 'beaten_epochs': self.beaten_epochs,
                 'best_epoch_score': self.best_epoch_score,
+                'best_stats': self.best_stats,
                 'outputs': outputs
             }
             torch.save(results, filename)
@@ -216,6 +217,7 @@ class Trainer(BaseTrainer):
                 'best_epoch': self.best_epoch,
                 'beaten_epochs': self.beaten_epochs,
                 'best_epoch_score': self.best_epoch_score,
+                'best_stats': self.best_stats,
                 'model_state_dict': self._model.state_dict(),
             }
 
@@ -243,6 +245,18 @@ class Trainer(BaseTrainer):
         return filename
 
     def load_checkpoint(self, filename=None, is_best=False):
+        """
+            This function actually restores a checkpoint with:
+
+            - model state_dict
+            - optimizers state_dict
+            - global_step
+            - epoch
+            - best_epoch
+            - beaten_epochs
+            - best_epoch_score
+            - best_stats
+        """
 
         path = self.checkpoints_dir
         ckp_format = self.checkpoints_format
@@ -261,9 +275,10 @@ class Trainer(BaseTrainer):
         self._global_step = checkpoint.get('global_step', checkpoint.get('seen', 0))
         self._epoch = checkpoint['epoch']
 
-        self.best_epoch = self._model.checkpoint['best_epoch']
-        self.beaten_epochs = self._model.checkpoint['beaten_epochs']
-        self.best_epoch_score = self._model.checkpoint['best_epoch_score']
+        self._model.best_epoch = checkpoint.get('best_epoch', -1)
+        self._model.beaten_epochs = checkpoint.get('beaten_epochs', 0)
+        self._model.best_epoch_score = checkpoint.get('best_epoch_score', 0)
+        self._model.best_stats = checkpoint.get('best_stats', [])
 
         self._model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -275,7 +290,27 @@ class Trainer(BaseTrainer):
             self._model.optimizer.load_state_dict(
                 checkpoint['optimizer_state_dict'])
 
+    def load_checkpoint_for_test(self):
+        """
+            This function can be used at the end of a training,
+            because it needs best_epoch and (current) epoch to be up to date.
+        """
+
+        if self.best_epoch > 0:
+            # -- if taking track of best model
+            self.console_log.info("Reloading best epoch %d ", self.best_epoch)
+            self.load_checkpoint(self.best_epoch, is_best=True)
+        else:
+            self.console_log.info("Reloading last epoch %d ", self.epoch)
+            self.load_checkpoint(self.epoch, is_best=False)
+
     def restore_exp(self):
+        """
+            If a restore_path is specified it restore a specific checkpoint.
+            Otherwise, it finds the last checkpoint in checkpoints_dir and
+            reload it.
+        """
+
         ckp_format = self.checkpoints_format
         if os.path.isfile(self._restore_path):
             # check if restart_path is a specific checkpoint
@@ -307,7 +342,12 @@ class Trainer(BaseTrainer):
                 pass
 
     def clean_best_checkpoints(self):
-        # -- keep only topk best performing checkpoints
+        """
+        This function keeps only topk best performing checkpoints.
+        Delete all the rest from file system.
+        Use `args.loggers.keep_topk_checkpoints` to control topk.
+        """
+
         topk = self.args.loggers.keep_topk_checkpoints
         for el in self.best_stats[:-topk]:
             filename = os.path.join(
@@ -425,7 +465,7 @@ class Trainer(BaseTrainer):
                 self.early_stopping.mode
             )
 
-        # Reload last or best epoch
+        # Reload last epoch
         if self._restore_path is not None:
             self.restore_exp()
         else:
@@ -464,9 +504,8 @@ class Trainer(BaseTrainer):
                     output_val)
                 self.save_best_checkpoint(is_best)
 
-        self.console_log.info("Reloading best epoch %d ", self.best_epoch)
-        self.load_checkpoint(self.best_epoch, is_best=True)
-
+        # -- reload last or best checkpoint
+        self.load_checkpoint_for_test()
         if self._test_loader is not None:
             # -- Test the network
             output_test = dict()
