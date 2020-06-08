@@ -124,7 +124,7 @@ class ConfusionMatrix(ScikitMetric):
         preds = np.concatenate(self.preds, axis=0)
 
         self.conf_matrix = confusion_matrix(
-            labels, preds, np.arange(self.num_classes))
+            labels, preds, labels=np.arange(self.num_classes))
 
         if self.num_classes == 2:
             self.tn, self.fp, self.fn, self.tp = self.conf_matrix.ravel()
