@@ -14,10 +14,13 @@ data:
     num_workers: 4
     pin_memory: True
 
+debug:
+    save_inputs: False
+
 loggers:
     logdir: '${env:YAPT_LOGDIR}'
     checkpoints_format: 'epoch_{}.pt'
-    keep_only_last_checkpoint: False
+    keep_only_last_checkpoint: True
     keep_topk_checkpoints: 5
 
     log_every: 10

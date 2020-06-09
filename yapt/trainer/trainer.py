@@ -51,6 +51,18 @@ class Trainer(BaseTrainer):
         return self._test_loader
 
     @property
+    def debug_dir(self):
+        _debug_dir = os.path.join(self._logdir, 'debug')
+        safe_mkdirs(_debug_dir, True)
+        return _debug_dir
+
+    @property
+    def inputs_dir(self):
+        _inputs_dir = os.path.join(self.debug_dir, 'inputs')
+        safe_mkdirs(_inputs_dir, True)
+        return _inputs_dir
+
+    @property
     def checkpoints_dir(self):
         _checkpoints_dir = os.path.join(self._logdir, 'checkpoints')
         safe_mkdirs(_checkpoints_dir, True)
@@ -411,6 +423,14 @@ class Trainer(BaseTrainer):
             for batch_idx, batch in enumerate(self._train_pbar):
                 if batch_idx >= self.num_batches_train:
                     break
+
+                if self.args.debug.save_inputs:
+                    # epoch
+                    path = os.path.join(self.inputs_dir, 'epoch_{}'.format(self.epoch))
+                    safe_mkdirs(path, exist_ok=True)
+                    filename = os.path.join(path, 'batch_{}.pt'.format(batch_idx))
+                    torch.save(batch, filename)
+
                 device_batch = self.to_device(batch)
 
                 # -- Model specific schedulers
