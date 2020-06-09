@@ -272,6 +272,7 @@ class BaseModel(ABC, nn.Module):
         patience = args.patience
         mode = args.mode
         train_until_end = get_maybe_missing_args(args, 'train_until_end', False)
+        warmup = get_maybe_missing_args(args, 'warmup', -1)
         compare_op = max if mode == "max" else min
 
         is_best = False
@@ -299,9 +300,11 @@ class BaseModel(ABC, nn.Module):
             self._beaten_epochs = 0
             is_best = True
         else:
-            self._beaten_epochs += 1
+            if self.epoch > warmup:
+                self._beaten_epochs += 1
 
-        if self._beaten_epochs >= patience and not train_until_end:
+        if (self._beaten_epochs >= patience and
+                not train_until_end and self.epoch > warmup):
             self._early_stop = True
 
         return is_best, self._early_stop
