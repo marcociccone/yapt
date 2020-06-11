@@ -1,4 +1,5 @@
 import torch
+import torchvision
 import inspect
 import hashlib
 import os
@@ -12,14 +13,194 @@ from functools import wraps
 from time import time
 from PIL import Image
 from textwrap import wrap
-from omegaconf import ListConfig, DictConfig
-from collections import MutableMapping
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, ListConfig, DictConfig
+from collections import MutableMapping, OrderedDict
+from typing import Union
 
 log = logging.getLogger(__name__)
 
 
+def listdict_to_dictlist(list_dict):
+    return{k: [dic[k] for dic in list_dict] for k in list_dict[0]}
+
+
+def permute(x: Union[torch.Tensor, np.ndarray], dims: Union[list, tuple]):
+    """A wrapper function to permute a torch.Tensor or numpy.ndarray.
+
+    Args:
+        x (Union[torch.Tensor, numpy.ndarray]): tensor or array to be permuted
+        dims (Union[list, tuple]): permutation of dims
+    Returns:
+        The permuted tensor (Numpy or Torch)
+    """
+
+    if isinstance(x, np.ndarray):
+        return x.transpose(dims)
+    elif isinstance(x, torch.Tensor):
+        return x.permute(*dims)
+    else:
+        raise NotImplementedError("Only torch.Tensor and numpy.ndarray supported")
+
+
+def swap_channels(x: Union[torch.Tensor, np.ndarray],
+                  dim_channels: str = 'last'):
+    """An helper function to fix image(s) shape by swapping the position of the
+    channels as expected
+
+    Args:
+        x (Union[torch.Tensor, numpy.ndarray]): a 2-D, 3-D or 4-D tensor.
+        dim_channels (str): where the channels of the image should be.
+            It can be `first` or `last`. If channels are not in the right
+            position, the tenosr is permuted.
+    Returns:
+        A new tensor of the image(s) with channels in the specified position.
+    """
+
+    shape = list(x.shape)
+    x_new = x
+
+    assert dim_channels in ('first', 'last'), \
+        "Only first and last dimension for channels"
+
+    assert len(shape) in (2, 3, 4), \
+        "Single image or batch of images are only allowed. " \
+        "Your tensor has shape {}".format(str(x.shape))
+
+    # -- grey-scale single img
+    if len(shape) == 2:
+        if dim_channels == 'first':
+            x_new = x.reshape(*(x.shape + [1]))
+        else:
+            x_new = x.reshape(*([1] + x.shape))
+
+    # -- rgb or grey-scale single img
+    elif len(shape) == 3:
+        # -- move from first to last dim
+        if shape[0] in (1, 3) and dim_channels == 'last':
+            x_new = permute(x, (1, 2, 0))
+
+        # -- move from last to first dim
+        elif shape[2] in (1, 3) and dim_channels == 'first':
+            x_new = permute(x, (2, 0, 1))
+
+    # -- batch of rgb or grey-scale imgs
+    elif len(shape) == 4:
+        # -- move from first to last dim
+        if shape[1] in (1, 3) and dim_channels == 'last':
+            x_new = permute(x, (0, 2, 3, 1))
+
+        # -- move from last to first dim
+        elif shape[3] in (1, 3) and dim_channels == 'first':
+            x_new = permute(x, (0, 3, 1, 2))
+
+    return x_new
+
+
+def prepare_dict_images(imgs_dict: dict, dim_channels: str = 'first'):
+    """This function checks inside a dict that all tensors have the same batch
+    size and channels are in the same position.
+
+    Args:
+        imgs_dict (dict): each key in the dictionary contains a batch of images.
+        dim_channels (str): it can be `first` or `last`, swap channels to this
+            position.
+
+    Returns: a new dictionary
+
+    """
+
+    # get batch size
+    bs = imgs_dict[list(imgs_dict.keys())[0]].shape[0]
+    assert all([v.shape[0] == bs for k, v in imgs_dict.items()]), \
+        "batch size should be the same for all images in the dictionary"
+
+    # -- swap channels axis if necessary and move to numpy cpu
+    new_imgs_dict = OrderedDict()
+    for k, imgs in imgs_dict.items():
+        new_imgs_dict[k] = swap_channels(imgs.cpu().numpy(), dim_channels)
+
+    return new_imgs_dict
+
+
+def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'first', stack: bool = False):
+    """This function concats multiple images from a dictionary horizontally.
+    Batch dimension remains independent.
+
+    Args:
+        imgs_dict (dict): each key contains a batch of images to be concatenated
+        dim_channels (str): it can be `first` or `last`, swap channels to this position.
+        stack (bool): stack concatenated images on batch dimension.
+
+    Returns: a torch.Tensor or a list of concatenated images
+    """
+
+    # get batch size
+    bs = imgs_dict[list(imgs_dict.keys())[0]].shape[0]
+    new_imgs_dict = prepare_dict_images(imgs_dict, dim_channels)
+
+    _new_batch = []
+    for idx in range(bs):
+        # stack images horizontally
+        # np.hstack requires channels in last dimension
+        _imgs_to_compare = [swap_channels(img[idx], 'last')
+                            for _, img in new_imgs_dict.items()]
+        # restore channels as expected
+        _imgs_to_compare = swap_channels(
+            np.hstack(_imgs_to_compare), dim_channels)
+
+        # populate batch
+        _new_batch.append(torch.tensor(_imgs_to_compare))
+
+    if stack:
+        _new_batch = torch.stack(_new_batch)
+
+    return _new_batch
+
+
+def create_grid(imgs_dict: dict,
+                nrow: int,
+                dim_channels: str = 'first',
+                kwargs_grid: dict = {}):
+
+    """This is an helper function that arranges multiple images in a dictionary
+    into a grid creating a single final image. It is useful to arrange together
+    images referring to the same input, e.g. multiple reconstructions.
+
+    Args:
+        x (torch.Tensor): original image
+        recs (dict): different reconstructions
+        nrow (int): number of comparisons per row?
+        kwargs_grid (dict): kwargs for torchvision.utils.make_grid
+    """
+
+    # TODO: write key description on image
+    # TODO: maybe could plot as a chart in neptune instead that an image
+
+    bs = imgs_dict[list(imgs_dict.keys())[0]].shape[0]
+    new_imgs_dict = prepare_dict_images(imgs_dict, dim_channels)
+    n = len(new_imgs_dict.keys()) + 1
+
+    # -- stack on batch size: a comparison every n images
+    _new_batch = []
+    for idx in range(bs):
+        # every n images there is a comparison
+        for _, img in new_imgs_dict.items():
+            _new_batch += [torch.tensor(img[idx])]
+
+    # -- make_grid requires channels on the first dimension
+    _new_batch = swap_channels(torch.stack(_new_batch), 'first')
+    grid = torchvision.utils.make_grid(
+        _new_batch, nrow=nrow, **kwargs_grid)
+    # -- restore to the expected channel shape
+    grid = swap_channels(grid, dim_channels)
+    return grid
+
+
 def recursive_keys(_dict):
+    """
+    Helper function that visits recursively a dictionary and print its keys.
+    It is useful for debugging and exception messages.
+    """
     keys = []
     for k, v in _dict.items():
         if isinstance(v, dict):
