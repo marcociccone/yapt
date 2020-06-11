@@ -301,9 +301,16 @@ class BaseModel(ABC, nn.Module):
     #     if self._log_val.calls < 1:
     #         self.warning_not_implemented()
 
-    def early_stopping(self, current_stats: dict) -> (bool, bool):
+    def _update_best_stats(self, current):
+        """Update statistics and variables regarding best model.
         """
-        This function implements a classic early stopping
+        self._best_stats.append((self.epoch, current))
+        self._best_epoch_score = current
+        self._best_epoch = self.epoch
+        self._beaten_epochs = 0
+
+    def early_stopping(self, current_stats: dict) -> (bool, bool):
+        """This function implements a classic early stopping
         procedure with patience. An example of the arguments that
         can be used is provided.
 
@@ -358,15 +365,12 @@ class BaseModel(ABC, nn.Module):
 
         # -- first epoch, initialize and do not stop
         if len(self._best_stats) == 0:
-            self._best_stats.append((self.epoch, current))
+            self._update_best_stats(current)
             return True, False
 
         best = self._best_stats[-1][1]
         if compare_op(current, best) != best:
-            self._best_stats.append((self.epoch, current))
-            self._best_epoch_score = current
-            self._best_epoch = self.epoch
-            self._beaten_epochs = 0
+            self._update_best_stats(current)
             is_best = True
         else:
             if self.epoch > warmup:
