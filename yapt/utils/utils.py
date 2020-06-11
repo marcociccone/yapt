@@ -96,7 +96,7 @@ def swap_channels(x: Union[torch.Tensor, np.ndarray],
     return x_new
 
 
-def prepare_dict_images(imgs_dict: dict, dim_channels: str = 'first'):
+def prepare_dict_images(imgs_dict: dict, dim_channels: str = 'last'):
     """This function checks inside a dict that all tensors have the same batch
     size and channels are in the same position.
 
@@ -122,7 +122,7 @@ def prepare_dict_images(imgs_dict: dict, dim_channels: str = 'first'):
     return new_imgs_dict
 
 
-def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'first', stack: bool = False):
+def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'last', stack: bool = False):
     """This function concats multiple images from a dictionary horizontally.
     Batch dimension remains independent.
 
@@ -159,7 +159,7 @@ def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'first', stack: bool 
 
 def create_grid(imgs_dict: dict,
                 nrow: int,
-                dim_channels: str = 'first',
+                dim_channels: str = 'last',
                 kwargs_grid: dict = {}):
 
     """This is an helper function that arranges multiple images in a dictionary
@@ -167,9 +167,9 @@ def create_grid(imgs_dict: dict,
     images referring to the same input, e.g. multiple reconstructions.
 
     Args:
-        x (torch.Tensor): original image
-        recs (dict): different reconstructions
-        nrow (int): number of comparisons per row?
+        imgs_dict (dict): each key in the dictionary contains a batch of images.
+        nrow (int): number of comparisons per row
+        dim_channels (str): it can be `first` or `last`, swap channels to this position.
         kwargs_grid (dict): kwargs for torchvision.utils.make_grid
     """
 
@@ -191,6 +191,27 @@ def create_grid(imgs_dict: dict,
     _new_batch = swap_channels(torch.stack(_new_batch), 'first')
     grid = torchvision.utils.make_grid(
         _new_batch, nrow=nrow, **kwargs_grid)
+    # -- restore to the expected channel shape
+    grid = swap_channels(grid, dim_channels)
+    return grid
+
+
+def hconcat_and_make_grid(imgs_dict,
+                          dim_channels: str = 'last',
+                          kwargs_grid: dict = {}):
+    """This function combines hconcat_per_image and make_grid.
+    First it concats horizontally the images to be compared into a single image,
+    then it arranges the resulting images into a grid.
+
+    Args:
+        imgs_dict (dict): each key in the dictionary contains a batch of images.
+        dim_channels (str): it can be `first` or `last`, swap channels to this position.
+        kwargs_grid (dict): kwargs for torchvision.utils.make_grid
+    """
+    _new_batch = hconcat_per_image(imgs_dict, dim_channels='first', stack=True)
+    # arrange in a grid the concatenated images
+    grid = torchvision.utils.make_grid(
+        _new_batch, **kwargs_grid)
     # -- restore to the expected channel shape
     grid = swap_channels(grid, dim_channels)
     return grid
