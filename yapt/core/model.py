@@ -11,7 +11,7 @@ from yapt.utils.trainer_utils import (get_optimizer, get_scheduler_optimizer,
                                       detach_dict, to_device)
 from yapt.utils.utils import (call_counter, warning_not_implemented,
                               get_maybe_missing_args, add_key_dict_prefix,
-                              is_list, is_scalar, recursive_keys)
+                              is_list, is_scalar, is_dict, recursive_keys)
 
 
 def is_pickable(obj):
@@ -120,6 +120,7 @@ class BaseModel(ABC, nn.Module):
     def training_step(self, batch, epoch, *args, **kwargs) -> dict:
         self._epoch = epoch
         outputs = self._training_step(batch, epoch, *args, **kwargs)
+        assert is_dict(outputs), "Output of _training_step should be a dict"
         # Hopefully avoid any memory leak on gpu
         outputs = detach_dict(outputs)
         outputs = to_device(outputs, 'cpu')
@@ -129,6 +130,7 @@ class BaseModel(ABC, nn.Module):
 
     def validation_step(self, *args, **kwargs) -> dict:
         outputs = self._validation_step(*args, **kwargs)
+        assert is_dict(outputs), "Output of _validation_step should be a dict"
         # Hopefully avoid any memory leak on gpu
         outputs = detach_dict(outputs)
         outputs = to_device(outputs, 'cpu')
@@ -137,6 +139,10 @@ class BaseModel(ABC, nn.Module):
 
     def test_step(self, *args, **kwargs) -> dict:
         outputs = self._test_step(*args, **kwargs)
+        assert is_dict(outputs), "Output of _test_step should be a dict"
+        # Hopefully avoid any memory leak on gpu
+        outputs = detach_dict(outputs)
+        outputs = to_device(outputs, 'cpu')
         return outputs
 
     # --------------------------------------------------------
@@ -187,6 +193,11 @@ class BaseModel(ABC, nn.Module):
 
     @abstractmethod
     def _build_model(self) -> None:
+        """
+        This method should be implemented specifically for your model.
+        Create all your pytorch modules here. This is where all the network
+        parameters should be instantiated.
+        """
         pass
 
     def _configure_optimizer(self, parameters=None):
@@ -223,8 +234,37 @@ class BaseModel(ABC, nn.Module):
             optimizer=self.optimizer, **scheduler_params)
         return scheduler
 
+    # ------------------------------------------------------------------
+
     @abstractmethod
     def _training_step(self, batch, epoch) -> dict:
+        """This method should be implemented specifically for your model.
+        It should includes calls to forward and backward of your model
+        and to the optimizers. For a concrete example please follow the
+        MNIST example implementation.
+
+        Example
+        -------
+        .. code-block:: python
+            def _training_step(self, batch, epoch):
+                x, y = batch
+                # forward pass
+                pred = self.network(x)
+                # backward pass
+                loss = self.loss_fn(pred, y)
+                loss.backward()
+                # optimization step
+                self.zero_grad()
+                self.optimizer.step()
+                ...
+                # logging statistics
+                output = {
+                    'running_tqdm': running_tqdm,
+                    'final_tqdm': final_tqdm,
+                    'stats': stats
+                }
+                return output
+        """
         pass
 
     def _validation_step(self, *args, **kwargs) -> dict:
@@ -261,7 +301,36 @@ class BaseModel(ABC, nn.Module):
     #     if self._log_val.calls < 1:
     #         self.warning_not_implemented()
 
-    def early_stopping(self, current_stats: dict) -> bool:
+    def early_stopping(self, current_stats: dict) -> (bool, bool):
+        """
+        This function implements a classic early stopping
+        procedure with patience. An example of the arguments that
+        can be used is provided.
+
+        ```yml
+        early_stopping:
+          dataset: 'validation'
+          metric: 'validation/y_acc'
+          patience: 10
+          mode: 'max'              # or 'min'
+          train_until_end: False   # it keeps going until the end of training
+          warmup: -1               # number of epochs to skip early stopping
+                                   # (it disable patience count)
+
+        ```
+
+        Args:
+            current_stats (dict): a possibly nested dictionary of the results
+                from validation at current epoch. Keys should follow an
+                hierarchy as dataset->stats->metric. For custom stats,
+                `metric` can be retrieved overriding the method
+                `self._get_metric_early_stopping`.
+
+        Returns:
+            A tuple (is_best, is_stop) describing the status of early stopping.
+            `is_stop` is also assigned to the self object.
+        """
+
         args = get_maybe_missing_args(self.args, 'early_stopping')
         if args is None:
             # -- Do not save in best, and do not stop
