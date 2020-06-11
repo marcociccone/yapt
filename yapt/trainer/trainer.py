@@ -553,6 +553,7 @@ class Trainer(BaseTrainer):
         # Enters eval mode
         self._model.eval()
         self._model.init_val_stats()
+        self._model.on_validation_start(set_name)
 
         pbar_descr_prefix = "  %s - " % set_name.title()
 
@@ -570,11 +571,15 @@ class Trainer(BaseTrainer):
             desc=pbar_descr_prefix, **self.args.loggers.tqdm)
 
         outputs = None
+        outputs_list = []
         for batch_idx, batch in enumerate(self._val_pbar):
             if batch_idx >= num_batches:
                 break
             device_batch = self.to_device(batch)
             outputs = self._model.validation_step(device_batch, self._epoch)
+
+            # -- accumulate outputs from validation steps to be used later
+            outputs_list.append(outputs)
 
             running_tqdm = outputs.get('running_tqdm', dict())
             # self._val_pbar.set_postfix(ordered_dict=running_tqdm)
@@ -588,6 +593,7 @@ class Trainer(BaseTrainer):
 
         # --------------------------------------------------------------------
 
+        self._model.on_validation_end(set_name, outputs_list)
         self._model.reset_val_stats()
         if outputs is not None:
             if logger is not None:

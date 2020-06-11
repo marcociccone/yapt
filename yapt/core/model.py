@@ -388,12 +388,28 @@ class BaseModel(ABC, nn.Module):
             return None
 
         return current_stats[dataset]['stats'].get(metric, None)
+
     # --------------------------------------------------------
 
-    def summarize(self):
-        if self.args.input_dims is not None:
-            from torchsummary import summary
-            summary(self, tuple(self.args.input_dims))
+    # def on_train_start(self):
+    #     pass
+
+    # def on_train_end(self):
+    #     pass
+
+    # def on_epoch_start(self):
+    #     pass
+
+    # def on_epoch_end(self):
+    #     pass
+
+    def on_validation_start(self, descr: str) -> None:
+        pass
+
+    def on_validation_end(self, descr: str, outputs_list: list = None) -> None:
+        pass
+
+    # --------------------------------------------------------
 
     def freeze(self):
         r"""
