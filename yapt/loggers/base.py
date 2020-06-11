@@ -185,7 +185,7 @@ class LoggerList():
         """
         for logger in self._loggers:
             log_fn = getattr(logger, "log_artifact", None)
-            if callable(log_fn) is not None:
+            if callable(log_fn):
                 log_fn(artifact, destination)
 
     def log_image(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
@@ -199,8 +199,31 @@ class LoggerList():
         """
         for logger in self._loggers:
             log_fn = getattr(logger, "log_image", None)
-            if callable(log_fn) is not None:
+            if callable(log_fn):
                 log_fn(log_name, image, step)
+
+    def log_chart(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
+        """Logs charts from matplotlib, plotly, bokeh, and altair to neptune.
+
+        Plotly, Bokeh, and Altair charts are converted to interactive HTML objects and then uploaded to Neptune
+        as an artifact with path charts/{name}.html.
+
+        Matplotlib figures are converted optionally. If plotly is installed, matplotlib figures are converted
+        to plotly figures and then converted to interactive HTML and uploaded to Neptune as an artifact with
+        path charts/{name}.html. If plotly is not installed, matplotlib figures are converted to PNG images
+        and uploaded to Neptune as an artifact with path charts/{name}.png
+
+        Args:
+            log_name (:obj:`str`):
+                | Name of the chart (without extension) that will be used as a part of artifact's destination.
+            chart (:obj:`matplotlib` or :obj:`plotly` Figure):
+                | Figure from `matplotlib` or `plotly`. If you want to use global figure from `matplotlib`, you
+                  can also pass reference to `matplotlib.pyplot` module.
+        """
+        for logger in self._loggers:
+            log_fn = getattr(logger, "log_chart", None)
+            if callable(log_fn):
+                log_fn(log_name, image)
 
     def log_hyperparams(self, params):
         """Record hyperparameters.
@@ -291,6 +314,56 @@ class LoggerDict():
         """
         for key, logger in self._loggers.items():
             logger.log_metrics(metrics, step)
+
+    def log_artifact(self, artifact: str, destination: Optional[str] = None) -> None:
+        """Save an artifact (file) in storage (if the logger allows it)
+
+        Args:
+            artifact: A path to the file in local filesystem.
+            destination: Optional default None. A destination path.
+                If None is passed, an artifact file name will be used.
+        """
+        for key, logger in self._loggers.items():
+            log_fn = getattr(logger, "log_artifact", None)
+            if callable(log_fn):
+                log_fn(artifact, destination)
+
+    def log_image(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
+        """Log image data if the logger allows it.
+
+        Args:
+            log_name: The name of log, i.e. bboxes, visualisations, sample_images.
+            image (str|PIL.Image|matplotlib.figure.Figure): The value of the log (data-point).
+                Can be one of the following types: PIL image, matplotlib.figure.Figure, path to image file (str)
+            step: Step number at which the metrics should be recorded, must be strictly increasing
+        """
+        for key, logger in self._loggers.items():
+            log_fn = getattr(logger, "log_image", None)
+            if callable(log_fn):
+                log_fn(log_name, image, step)
+
+    def log_chart(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
+        """Logs charts from matplotlib, plotly, bokeh, and altair to neptune.
+
+        Plotly, Bokeh, and Altair charts are converted to interactive HTML objects and then uploaded to Neptune
+        as an artifact with path charts/{name}.html.
+
+        Matplotlib figures are converted optionally. If plotly is installed, matplotlib figures are converted
+        to plotly figures and then converted to interactive HTML and uploaded to Neptune as an artifact with
+        path charts/{name}.html. If plotly is not installed, matplotlib figures are converted to PNG images
+        and uploaded to Neptune as an artifact with path charts/{name}.png
+
+        Args:
+            log_name (:obj:`str`):
+                | Name of the chart (without extension) that will be used as a part of artifact's destination.
+            chart (:obj:`matplotlib` or :obj:`plotly` Figure):
+                | Figure from `matplotlib` or `plotly`. If you want to use global figure from `matplotlib`, you
+                  can also pass reference to `matplotlib.pyplot` module.
+        """
+        for key, logger in self._loggers.items():
+            log_fn = getattr(logger, "log_chart", None)
+            if callable(log_fn):
+                log_fn(log_name, image)
 
     def log_hyperparams(self, params):
         """Record hyperparameters.

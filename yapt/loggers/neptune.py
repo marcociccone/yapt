@@ -19,10 +19,14 @@ from .base import LoggerBase, rank_zero_only
 try:
     import neptune
     from neptune.experiments import Experiment
-    from neptune.projects import Project
 except ImportError:  # pragma: no-cover
     raise ImportError('You want to use `neptune` logger which is not installed yet,'  # pragma: no-cover
                       ' install it with `pip install neptune-client`.')
+try:
+    import neptunecontrib
+except ImportError:  # pragma: no-cover
+    raise ImportError('You want to use `neptune-contrib` which is not installed yet,'  # pragma: no-cover
+                      ' install it with `pip install neptune-contrib for extra features`.')
 
 
 class NeptuneLogger(LoggerBase):
@@ -310,6 +314,27 @@ class NeptuneLogger(LoggerBase):
         self.log_metric(log_name, text, step=step)
 
     @rank_zero_only
+    def log_chart(self, log_name: str, chart):
+        """Logs charts from matplotlib, plotly, bokeh, and altair to neptune.
+
+        Plotly, Bokeh, and Altair charts are converted to interactive HTML objects and then uploaded to Neptune
+        as an artifact with path charts/{name}.html.
+
+        Matplotlib figures are converted optionally. If plotly is installed, matplotlib figures are converted
+        to plotly figures and then converted to interactive HTML and uploaded to Neptune as an artifact with
+        path charts/{name}.html. If plotly is not installed, matplotlib figures are converted to PNG images
+        and uploaded to Neptune as an artifact with path charts/{name}.png
+
+        Args:
+            log_name (:obj:`str`):
+                | Name of the chart (without extension) that will be used as a part of artifact's destination.
+            chart (:obj:`matplotlib` or :obj:`plotly` Figure):
+                | Figure from `matplotlib` or `plotly`. If you want to use global figure from `matplotlib`, you
+                  can also pass reference to `matplotlib.pyplot` module.
+        """
+        neptunecontrib.api.log_chart(log_name, chart, self.experiment)
+
+    @rank_zero_only
     def log_image(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
         """Log image data in Neptune experiment
 
@@ -319,10 +344,7 @@ class NeptuneLogger(LoggerBase):
                 Can be one of the following types: PIL image, matplotlib.figure.Figure, path to image file (str)
             step: Step number at which the metrics should be recorded, must be strictly increasing
         """
-        if step is None:
-            self.experiment.log_image(log_name, image)
-        else:
-            self.experiment.log_image(log_name, x=step, y=image)
+        self.experiment.log_image(log_name, image)
 
     @rank_zero_only
     def log_artifact(self, artifact: str, destination: Optional[str] = None) -> None:
