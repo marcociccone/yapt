@@ -122,14 +122,55 @@ def prepare_dict_images(imgs_dict: dict, dim_channels: str = 'last'):
     return new_imgs_dict
 
 
-def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'last', stack: bool = False):
+def write_video(frames, fname, fps=15, codec='mp4v', to_int=False):
+    """Utility function to serialize a 4D numpy tensor to video and save it to
+    filesystem.
+    http://www.pyimagesearch.com/2016/02/22/writing-to-video-with-opencv/
+
+    Args:
+        frames: 4D numpy array
+        fname (str): output filename
+        fps (int): frame rate of the ouput video
+        codec (str): 4 digits string codec, default='H264' converted to RGB
+        to_int (bool): if True, it converts from [0, 1.0] to [0, 255]
+    """
+
+    import cv2
+    fourcc = cv2.VideoWriter_fourcc(*codec)
+
+    if isinstance(frames, list):
+        frames = np.stack(frames, axis=0)
+
+    if frames.ndim == 3:
+        frames = np.expand_dims(frames, axis=-1)
+    assert frames.ndim == 4
+
+    h, w = frames.shape[1:3]
+    writer = cv2.VideoWriter(
+        fname, fourcc, fps, (w, h),
+        isColor=frames.shape[-1] in (2, 3))
+
+    for f in frames:
+        if frames.shape[-1] == 3:
+            f = cv2.cvtColor(np.float32(f), cv2.COLOR_RGB2BGR)
+        if to_int:
+            f = (f * 255.0)
+        f = f.astype('uint8')
+        writer.write(f)
+
+    writer.release()
+
+
+def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'last',
+                      stack: bool = False, add_label: bool = True):
     """This function concats multiple images from a dictionary horizontally.
     Batch dimension remains independent.
 
     Args:
-        imgs_dict (dict): each key contains a batch of images to be concatenated
-        dim_channels (str): it can be `first` or `last`, swap channels to this position.
+        imgs_dict (dict): each key contains a batch of images to concatenate
+        dim_channels (str): `first` or `last`, swap channels to this position.
         stack (bool): stack concatenated images on batch dimension.
+        add_label (bool): if true, it draws keys to the first series of images.
 
     Returns: a torch.Tensor or a list of concatenated images
     """
@@ -138,18 +179,34 @@ def hconcat_per_image(imgs_dict: dict, dim_channels: str = 'last', stack: bool =
     bs = imgs_dict[list(imgs_dict.keys())[0]].shape[0]
     new_imgs_dict = prepare_dict_images(imgs_dict, dim_channels)
 
+    from torchvision.transforms import ToPILImage, ToTensor
+    from PIL import ImageDraw
+
     _new_batch = []
     for idx in range(bs):
-        # stack images horizontally
-        # np.hstack requires channels in last dimension
         _imgs_to_compare = [swap_channels(img[idx], 'last')
                             for _, img in new_imgs_dict.items()]
-        # restore channels as expected
-        _imgs_to_compare = swap_channels(
-            np.hstack(_imgs_to_compare), dim_channels)
+        # -- stack images horizontally
+        _imgs_to_compare = np.hstack(_imgs_to_compare)
 
-        # populate batch
-        _new_batch.append(torch.tensor(_imgs_to_compare))
+        # -- make it RGB for drawing text
+        _imgs_to_compare = torch.Tensor(_imgs_to_compare)
+        _imgs_to_compare = swap_channels(_imgs_to_compare, 'first')
+        if _imgs_to_compare.shape[0] == 1:
+            _imgs_to_compare = _imgs_to_compare.repeat(3, 1, 1)
+
+        if idx == 0 and add_label:
+            # -- create label to draw from keys
+            label = " - ".join(list(new_imgs_dict.keys()))
+            im = ToPILImage()(_imgs_to_compare)
+            draw = ImageDraw.Draw(im)
+            draw.text((2, 2), label, fill=(255, 0, 0))
+            _imgs_to_compare = ToTensor()(im) * 255.
+
+        # -- restore channels as expected
+        _imgs_to_compare = swap_channels(_imgs_to_compare, dim_channels)
+        # -- populate batch
+        _new_batch.append(_imgs_to_compare)
 
     if stack:
         _new_batch = torch.stack(_new_batch)
@@ -172,9 +229,6 @@ def create_grid(imgs_dict: dict,
         dim_channels (str): it can be `first` or `last`, swap channels to this position.
         kwargs_grid (dict): kwargs for torchvision.utils.make_grid
     """
-
-    # TODO: write key description on image
-    # TODO: maybe could plot as a chart in neptune instead that an image
 
     bs = imgs_dict[list(imgs_dict.keys())[0]].shape[0]
     new_imgs_dict = prepare_dict_images(imgs_dict, dim_channels)

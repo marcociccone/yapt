@@ -81,6 +81,18 @@ class Trainer(BaseTrainer):
         return _results_dir
 
     @property
+    def images_dir(self):
+        _results_dir = os.path.join(self._logdir, 'images')
+        safe_mkdirs(_results_dir, True)
+        return _results_dir
+
+    @property
+    def videos_dir(self):
+        _results_dir = os.path.join(self._logdir, 'videos')
+        safe_mkdirs(_results_dir, True)
+        return _results_dir
+
+    @property
     def checkpoints_format(self):
         return self.args.loggers.checkpoints_format
 
