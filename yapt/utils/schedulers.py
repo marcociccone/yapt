@@ -1,3 +1,25 @@
+class LinearScheduler:
+
+    def __init__(self, init_step, final_step, init_value, final_value):
+        assert final_step >= init_step
+        self.init_step = init_step
+        self.final_step = final_step
+        self.init_value = init_value
+        self.final_value = final_value
+
+    def get_value(self, step):
+
+        if step < self.init_step:
+            return self.init_value
+        elif step >= self.final_step:
+            return self.final_value
+        else:
+            if self.init_step == self.final_step:
+                return self.final_value
+
+            rate = (float(self.final_value - self.init_value) /
+                    float(self.final_step - self.init_step))
+            return self.init_value + rate * (step - self.init_step)
 
 class Scheduler:
     def __init__(self, parameters):

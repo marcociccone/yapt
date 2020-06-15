@@ -14,10 +14,16 @@ data:
     num_workers: 4
     pin_memory: True
 
+num_batches_train:
+num_batches_val:
+num_batches_test:
+
 debug:
     save_inputs: False
 
 loggers:
+    images:
+    debug: False
     logdir: '${env:YAPT_LOGDIR}'
     checkpoints_format: 'epoch_{}.pt'
     keep_only_last_checkpoint: True

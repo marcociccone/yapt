@@ -3,6 +3,13 @@ from omegaconf.basecontainer import BaseContainer
 from inspect import getfullargspec
 
 
+def get_maybe_missing_args(args, key, default=None):
+    if OmegaConf.is_missing(args, key):
+        return default
+    else:
+        return args.get(key)
+
+
 class default_args():
     """
         Decorator to load default parameters from file

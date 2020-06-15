@@ -1,10 +1,116 @@
 import csv
 import datetime
 import os
-import numpy as np
 import json
+import logging
+import torch
+import numpy as np
 
 
+log = logging.getLogger(__name__)
+
+
+def is_jsonable(x):
+    try:
+        json.dumps(x)
+        return True
+    except:
+        return False
+
+
+def clean_unjsonable_keys(arg_dict):
+    keys_to_delete = []
+    for key, value in arg_dict.items():
+        if not is_jsonable(value):
+            keys_to_delete.append(key)
+
+    new_dict = dict()
+    for kk, vv in arg_dict.items():
+        if kk not in keys_to_delete:
+            new_dict[kk] = vv
+    return new_dict
+
+
+def save_options(basedir, argparse_opt, sacred_opt=None):
+
+    argparse_dict = clean_unjsonable_keys(vars(argparse_opt))
+    with open('%s/opt.json' % basedir, 'w') as outfile:
+        json.dump(argparse_dict, outfile)
+
+    if sacred_opt is not None:
+        sacred_dict = clean_unjsonable_keys(sacred_opt)
+        # Store sacred_opt dictionary
+        with open('%s/sacred_cfg.json' % basedir, 'w') as outfile:
+            json.dump(sacred_dict, outfile)
+
+
+def load_options(basedir):
+    argparse_opt, sacred_opt = None, None
+    argparse_filename = '%s/opt.json' % basedir
+    if os.path.isfile(argparse_filename):
+        with open(argparse_filename, 'r') as f:
+            argparse_opt = json.load(f)
+
+    sacred_filename = '%s/sacred_cfg.json' % basedir
+    if os.path.isfile(sacred_filename):
+        with open(sacred_filename, 'r') as f:
+            sacred_opt = json.load(f)
+
+    return argparse_opt, sacred_opt
+
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    """Saves checkpoint to disk"""
+
+    for idx in range(10):
+        try:
+            torch.save(state, filename)
+            break
+        except IOError:
+            log.error("IOError: couldn't save the checkpoint after 10 trials")
+
+    filenames = {'last': filename}
+    if is_best:
+        filename_best = os.path.join(
+            os.path.dirname(filename), 'best_model.weights')
+
+        for idx in range(10):
+            try:
+                torch.save(state, filename_best)
+                break
+            except IOError:
+                log.error("IOError: couldn't save the checkpoint after 10 trials")
+
+        filenames['best'] = filename_best
+    return filenames
+
+
+def safe_mkdirs(path, exist_ok=True):
+    import errno
+    try:
+        # Use the same directory as the restart experiment
+        os.makedirs(path, exist_ok=exist_ok)
+    except Exception as err:
+        # get the name attribute from the exception class
+        if (type(err).__name__ == 'OSError' and
+                err.errno == errno.ENAMETOOLONG):
+            # handle specific to OSError [Errno 36]
+            os.makedirs(path[:143], exist_ok=exist_ok)
+        else:
+            raise  # if you want to re-raise; otherwise code your ignore
+
+
+def mkdirs(paths):
+    if isinstance(paths, list) and not isinstance(paths, str):
+        for path in paths:
+            mkdir(path)
+    else:
+        mkdir(paths)
+
+
+def mkdir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
 def save_to_json(filename, dict_to_store):
     with open(os.path.abspath(filename), 'w') as f:
         json.dump(dict_to_store, fp=f)

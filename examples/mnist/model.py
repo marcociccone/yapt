@@ -5,7 +5,7 @@ from torch import optim
 
 from collections import OrderedDict
 from yapt import BaseModel
-from yapt.utils.trainer_utils import get_optimizer
+from yapt.utils.torch_helpers import get_optimizer
 from yapt.utils.metrics import AverageMeter, ConfusionMatrix
 
 

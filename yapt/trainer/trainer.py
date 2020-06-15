@@ -5,9 +5,10 @@ import torch
 import numpy as np
 
 from itertools import cycle, islice
-from yapt.utils.trainer_utils import alternate_datasets, detach_dict
-from yapt.utils.utils import stats_to_str, safe_mkdirs, timing
-from yapt.utils.utils import is_notebook, is_dict, is_optimizer
+from yapt.utils.utils import is_notebook, is_dict, is_optimizer, stats_to_str
+from yapt.utils.storage import safe_mkdirs
+from yapt.utils.debugging import timing
+from yapt.utils.torch_helpers import alternate_datasets
 from yapt.trainer.base import BaseTrainer
 
 if is_notebook():
@@ -198,8 +199,9 @@ class Trainer(BaseTrainer):
     @timing
     def save_results(self, outputs, name, idx=''):
         try:
-            filename = os.path.join(
-                self.results_dir, "%s%s.pt" % (name, idx))
+            path = os.path.join(self.results_dir, name)
+            filename = os.path.join(path, "%s%s.pt" % (name, idx))
+            safe_mkdirs(path)
 
             results = {
                 'global_step': self.global_step,
@@ -428,10 +430,10 @@ class Trainer(BaseTrainer):
         self._train_pbar = tqdm(
             dataloader, total=self.num_batches_train,
             desc='', **self.args.loggers.tqdm)
-
         try:
             # -- Start epoch
             outputs = None
+            self._model.on_epoch_start()
             for batch_idx, batch in enumerate(self._train_pbar):
                 if batch_idx >= self.num_batches_train:
                     break
@@ -476,6 +478,7 @@ class Trainer(BaseTrainer):
             self.shutdown()
 
         # -- End Epoch
+        self._model.on_epoch_end()
         self._model.reset_train_stats()
 
         if outputs is not None:
@@ -504,6 +507,7 @@ class Trainer(BaseTrainer):
             # -- Save initialized weights: it could be useful for debugging
             self.save_checkpoint(filename=self.checkpoints_format.format('init'))
 
+        self._model.on_train_start()
         while self._epoch < self.max_epochs:
 
             self._epoch += 1
@@ -536,6 +540,7 @@ class Trainer(BaseTrainer):
                     output_val)
                 self.save_best_checkpoint(is_best)
 
+        self._model.on_train_end()
         # -- reload last or best checkpoint
         self.load_checkpoint_for_test()
         if self._test_loader is not None:

@@ -1,6 +1,5 @@
 import os
 import random
-import sys
 import glob
 import torch
 import logging
@@ -11,16 +10,16 @@ from functools import reduce
 from abc import ABC, abstractmethod
 from time import gmtime, strftime
 from copy import deepcopy
+from omegaconf import OmegaConf, ListConfig, DictConfig
 
-from omegaconf import OmegaConf
-from yapt.utils.trainer_utils import detach_dict, to_device
-from yapt.utils.utils import safe_mkdirs, is_dict, is_list, get_maybe_missing_args, flatten_dict
-from yapt.utils.debugging import IllegalArgumentError
+from yapt.utils.utils import is_dict, is_list, flatten_dict
+from yapt.utils.args import get_maybe_missing_args
+from yapt.utils.storage import safe_mkdirs
+from yapt.utils.torch_helpers import to_device
 
 from yapt.loggers.base import LoggerDict
 from yapt.loggers.tensorboard import TensorBoardLogger
 from yapt.loggers.neptune import NeptuneLogger
-from omegaconf import ListConfig, DictConfig
 
 
 def recursive_get(_dict, *keys):
@@ -172,9 +171,13 @@ class BaseTrainer(ABC):
                     "restore_path %s is not a file nor a dir" %
                     self._restore_path)
         else:
+            logdir = args.loggers.logdir
+            if args.loggers.debug:
+                logdir = os.path.join(logdir, 'debug')
+
             # TODO: this should be generalized
             self._logdir = os.path.join(
-                args.loggers.logdir,
+                logdir,
                 args.data.dataset_name.lower(),
                 model_class.__name__. lower(),
                 self._timestring + "_%s" % args.exp_name)
@@ -209,6 +212,11 @@ class BaseTrainer(ABC):
             self.console_log.warning("external logdir {}".format(
                 external_logdir))
 
+            if self.args.loggers.debug:
+                self.console_log.warning(
+                    "Debug flag is disable when external logdir is used")
+
+        # -- No loggers in test mode
         if self.mode == 'test':
             return None
 

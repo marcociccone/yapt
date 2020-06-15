@@ -21,14 +21,12 @@ log.basicConfig(level=log.INFO)
 _logger = getLogger("YAPT")
 
 from .trainer.base import BaseTrainer
-from .trainer.sacred_trainer import SacredTrainer
 from .trainer.trainer import Trainer
 from .trainer.tune_trainer import TuneWrapper, EarlyStoppingRule
 from .core.model import BaseModel
 
 __all__ = [
     'BaseTrainer',
-    'SacredTrainer',
     'Trainer',
     'BaseModel',
     'TuneWrapper',

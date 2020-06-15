@@ -7,7 +7,7 @@ from sacred import Experiment
 from sacred.observers import MongoObserver
 from sacred.utils import apply_backspaces_and_linefeeds
 from yapt import BaseTrainer
-from yapt.utils.utils import get_maybe_missing_args
+from yapt.utils.args import get_maybe_missing_args
 
 
 def main_ifsacred(func):

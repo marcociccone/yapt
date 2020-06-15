@@ -7,11 +7,13 @@ from collections import OrderedDict
 from yapt import _logger
 from yapt import BaseTrainer
 from yapt.loggers.base import LoggerDict
-from yapt.utils.trainer_utils import (get_optimizer, get_scheduler_optimizer,
+from yapt.utils.torch_helpers import (get_optimizer, get_scheduler_optimizer,
                                       detach_dict, to_device)
-from yapt.utils.utils import (call_counter, warning_not_implemented,
-                              get_maybe_missing_args, add_key_dict_prefix,
-                              is_list, is_scalar, is_dict, recursive_keys)
+from yapt.utils.debugging import call_counter
+from yapt.utils.args import get_maybe_missing_args
+from yapt.utils.utils import (warning_not_implemented,
+                              add_key_dict_prefix, is_list, is_scalar,
+                              is_dict, recursive_keys)
 
 
 def is_pickable(obj):
@@ -395,17 +397,17 @@ class BaseModel(ABC, nn.Module):
 
     # --------------------------------------------------------
 
-    # def on_train_start(self):
-    #     pass
+    def on_train_start(self):
+        pass
 
-    # def on_train_end(self):
-    #     pass
+    def on_train_end(self):
+        pass
 
-    # def on_epoch_start(self):
-    #     pass
+    def on_epoch_start(self):
+        pass
 
-    # def on_epoch_end(self):
-    #     pass
+    def on_epoch_end(self):
+        pass
 
     def on_validation_start(self, descr: str) -> None:
         pass
