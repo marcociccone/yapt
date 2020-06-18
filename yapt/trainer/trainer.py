@@ -452,7 +452,7 @@ class Trainer(BaseTrainer):
 
                 # -- Execute a training step
                 outputs = self._model.training_step(
-                    device_batch, self._epoch)
+                    device_batch)
 
                 # -- Save output for each training step
                 # self.collect_outputs(outputs)
@@ -593,7 +593,7 @@ class Trainer(BaseTrainer):
             if batch_idx >= num_batches:
                 break
             device_batch = self.to_device(batch)
-            outputs = self._model.validation_step(device_batch, self._epoch)
+            outputs = self._model.validation_step(device_batch)
 
             # -- accumulate outputs from validation steps to be used later
             outputs_list.append(outputs)

@@ -59,7 +59,7 @@ class Classifier(BaseModel):
         # -- LR scheduler
         return optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=10)
 
-    def _training_step(self, batch, epoch):
+    def _training_step(self, batch):
 
         # forward pass
         x, y = batch
@@ -88,7 +88,7 @@ class Classifier(BaseModel):
         # can also return just a scalar instead of a dict (return loss_val)
         return output
 
-    def _validation_step(self, batch, epoch):
+    def _validation_step(self, batch):
         with torch.no_grad():
             x, y = batch
             x = x.view(x.size(0), -1)

@@ -40,7 +40,6 @@ class BaseModel(ABC, nn.Module):
         self._best_stats = []
         self._early_stop = False
 
-        self._epoch = 0
         self._global_step = 0
         self._train_step = 0
         self._val_step = 0
@@ -72,7 +71,7 @@ class BaseModel(ABC, nn.Module):
 
     @property
     def epoch(self):
-        return self._epoch
+        return self._trainer._epoch
 
     @property
     def global_step(self):
@@ -119,9 +118,8 @@ class BaseModel(ABC, nn.Module):
     def reset_params(self) -> None:
         self._reset_params()
 
-    def training_step(self, batch, epoch, *args, **kwargs) -> dict:
-        self._epoch = epoch
-        outputs = self._training_step(batch, epoch, *args, **kwargs)
+    def training_step(self, batch, *args, **kwargs) -> dict:
+        outputs = self._training_step(batch, *args, **kwargs)
         assert is_dict(outputs), "Output of _training_step should be a dict"
         # Hopefully avoid any memory leak on gpu
         outputs = detach_dict(outputs)
@@ -188,7 +186,7 @@ class BaseModel(ABC, nn.Module):
         stats = add_key_dict_prefix(stats, prefix=descr, sep='/')
         # Filter out non-scalar items
         metrics = {k: v for k, v in stats.items() if is_scalar(v)}
-        self.logger.log_metrics(metrics, self._epoch)
+        self.logger.log_metrics(metrics, self.epoch)
         # self._log_val()
 
     # ------------------------------------------------------------------
@@ -239,7 +237,7 @@ class BaseModel(ABC, nn.Module):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _training_step(self, batch, epoch) -> dict:
+    def _training_step(self, batch) -> dict:
         """This method should be implemented specifically for your model.
         It should includes calls to forward and backward of your model
         and to the optimizers. For a concrete example please follow the
@@ -248,7 +246,7 @@ class BaseModel(ABC, nn.Module):
         Example
         -------
         .. code-block:: python
-            def _training_step(self, batch, epoch):
+            def _training_step(self, batch):
                 x, y = batch
                 # forward pass
                 pred = self.network(x)

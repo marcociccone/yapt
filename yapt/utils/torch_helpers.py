@@ -167,6 +167,7 @@ def get_activation(args):
         'softsign': activation.Softsign,
         'softmin': activation.Softmin,
         'tanhshrink': activation.Tanhshrink,
+        'identity': nn.Identity,
     })
 
     from packaging import version
