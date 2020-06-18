@@ -86,8 +86,8 @@ def stats_to_str(stats, fmt=":.4f"):
         "stats should be a dict instead is a {}".format(type(stats))
     string = ''
     for key, val in stats.items():
-        if torch.is_tensor(val) and val.ndim == 0:
-            val = val.item()
+        if is_scalar(val):
+            val = val.item() if torch.is_tensor(val) else val
             string += ("{}: {" + fmt + "} - ").format(key, val)
     return string
 
