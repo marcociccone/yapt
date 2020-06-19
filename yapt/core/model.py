@@ -119,6 +119,7 @@ class BaseModel(ABC, nn.Module):
         self._reset_params()
 
     def training_step(self, batch, *args, **kwargs) -> dict:
+        self.train()
         outputs = self._training_step(batch, *args, **kwargs)
         assert is_dict(outputs), "Output of _training_step should be a dict"
         # Hopefully avoid any memory leak on gpu
@@ -129,6 +130,7 @@ class BaseModel(ABC, nn.Module):
         return outputs
 
     def validation_step(self, *args, **kwargs) -> dict:
+        self.eval()
         outputs = self._validation_step(*args, **kwargs)
         assert is_dict(outputs), "Output of _validation_step should be a dict"
         # Hopefully avoid any memory leak on gpu
@@ -138,6 +140,7 @@ class BaseModel(ABC, nn.Module):
         return outputs
 
     def test_step(self, *args, **kwargs) -> dict:
+        self.eval()
         outputs = self._test_step(*args, **kwargs)
         assert is_dict(outputs), "Output of _test_step should be a dict"
         # Hopefully avoid any memory leak on gpu
