@@ -12,7 +12,7 @@ from omegaconf.basecontainer import BaseContainer
 
 
 def xavier_uniform_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
+    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
         init.xavier_uniform_(m.weight)
         if m.bias is not None:
             init.zeros_(m.bias)
@@ -23,7 +23,7 @@ def xavier_uniform_init(m):
 
 
 def kaiming_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
+    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
         init.kaiming_normal_(m.weight)
         if m.bias is not None:
             init.zeros_(m.bias)
@@ -34,7 +34,7 @@ def kaiming_init(m):
 
 
 def normal_init(m, mean, std):
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
+    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
         init.normal_(m.weight, mean, std)
         if m.bias is not None:
             init.zeros_(m.bias)
