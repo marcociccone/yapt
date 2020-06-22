@@ -24,6 +24,11 @@ class default_args():
         # avoid setting args that do not exist in defaults
         OmegaConf.set_struct(self.default_args, True)
 
+        self.error_message = (
+            "You can ovverride default_args defined in {}/{}! "
+            "To use default_args use args=None!".format(defaults, path)
+        )
+
     def __call__(self, fn):
         """
             The decorator is based on the assumption that the structure
@@ -36,10 +41,15 @@ class default_args():
         """
 
         def replace(arg):
-            if isinstance(arg, BaseContainer):
+            if arg is None:
+                return self.default_args
+
+            if isinstance(arg, (BaseContainer, dict)):
+                # -- This will raise an error if some args
+                # are not defined in self.default_args
                 return OmegaConf.merge(self.default_args, arg)
             else:
-                return arg
+                raise ValueError(self.error_message)
 
         def wrapped_f(*args, **kwargs):
             if 'args' in kwargs.keys():
