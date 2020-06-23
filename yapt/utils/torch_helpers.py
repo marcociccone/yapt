@@ -4,6 +4,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.init as init
 
+from functools import partial
 from torch import optim
 from torch.optim import lr_scheduler
 from torch.nn.modules import activation
@@ -11,37 +12,110 @@ from collections import OrderedDict
 from omegaconf.basecontainer import BaseContainer
 
 
-def xavier_uniform_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
-        init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-            init.zeros_(m.bias)
-    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        init.ones_(m.weight)
-        if m.bias is not None:
-            init.zeros_(m.bias)
+linear_layers = (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d,
+                 nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)
+
+norm_layers = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d,
+               nn.GroupNorm, nn.LayerNorm)
 
 
-def kaiming_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
-        init.kaiming_normal_(m.weight)
-        if m.bias is not None:
-            init.zeros_(m.bias)
-    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        init.ones_(m.weight)
-        if m.bias is not None:
-            init.zeros_(m.bias)
+
+def get_init_linears_fn(name, nonlinearity='relu', bias_init=0.,
+                        **init_fn_params):
+
+    inits = OrderedDict({
+        'xavier_uniform': xavier_uniform_init,
+        'xavier_normal': xavier_normal_init,
+        'kaiming_uniform': kaiming_uniform_init,
+        'kaiming_normal': kaiming_normal_init
+    })
+
+    init_fn = partial(inits[name], apply_to=linear_layers,
+                      nonlinearity=nonlinearity, bias_init=bias_init,
+                      **init_fn_params)
+    return init_fn
 
 
-def normal_init(m, mean, std):
-    if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+def norm_layers_init(m, gamma_init=1.0, bias_init=0.):
+    if isinstance(m, norm_layers):
+        if m.weight is not None:
+            init.constant_(m.weight, gamma_init)
+        if m.bias is not None:
+            init.constant_(m.bias, bias_init)
+
+
+def xavier_uniform_init(m, apply_to=linear_layers,
+                        nonlinearity='relu', bias_init=0.,
+                        **init_fn_params):
+    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
+    gain = init.calculate_gain(nonlinearity)
+    if isinstance(m, apply_to):
+        init.xavier_uniform_(m.weight, gain=gain, **init_fn_params)
+        if m.bias is not None:
+            init.constant_(m.bias, bias_init)
+
+
+def xavier_normal_init(m, apply_to=linear_layers,
+                       nonlinearity='relu', bias_init=0.,
+                       **init_fn_params):
+
+    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
+    gain = init.calculate_gain(nonlinearity)
+    if isinstance(m, apply_to):
+        init.xavier_normal_(m.weight, gain=gain, **init_fn_params)
+        if m.bias is not None:
+            init.constant_(m.bias, bias_init)
+
+
+def kaiming_uniform_init(m, apply_to=linear_layers,
+                         nonlinearity='relu', bias_init=0.,
+                         **init_fn_params):
+
+    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
+    if isinstance(m, apply_to):
+        init.kaiming_uniform_(
+            m.weight, nonlinearity=nonlinearity,
+            **init_fn_params)
+        if m.bias is not None:
+            init.constant_(m.bias, bias_init)
+
+
+def kaiming_normal_init(m, apply_to=linear_layers,
+                        nonlinearity='relu', bias_init=0.,
+                        **init_fn_params):
+
+    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
+    if isinstance(m, apply_to):
+        init.kaiming_normal_(
+            m.weight, nonlinearity=nonlinearity,
+            **init_fn_params)
+        if m.bias is not None:
+            init.constant_(m.bias, bias_init)
+
+
+def normal_init(m, mean, std, bias_init=0., **init_fn_params):
+    if isinstance(m, linear_layers):
         init.normal_(m.weight, mean, std)
         if m.bias is not None:
-            init.zeros_(m.bias)
-    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        init.ones_(m.weight)
-        if m.bias is not None:
-            init.zeros_(m.bias)
+            init.constant_(m.bias, bias_init)
+
+
+def get_init_linears_from_args(args, nonlinearity):
+    name = args.get('name', 'xavier_uniform')
+    bias_init = args.get('bias', 0.)
+    init_fn_params = args.get('params', {})
+    return get_init_linears_fn(
+        name, nonlinearity=nonlinearity,
+        bias_init=bias_init,
+        **init_fn_params)
+
+
+def get_init_batch_norm_from_args(args):
+    gamma_init = args.get('gamma', 1.)
+    bias_init = args.get('bias', 0.)
+    return partial(norm_layers_init,
+                   gamma_init=gamma_init,
+                   bias_init=bias_init)
 
 
 def alternate_datasets(labelled, unlabelled):
@@ -168,13 +242,13 @@ def get_activation(args):
         'softmin': activation.Softmin,
         'tanhshrink': activation.Tanhshrink,
         'identity': nn.Identity,
+        'linear': nn.Identity,
     })
 
     from packaging import version
     if version.parse(torch.__version__) >= version.parse("1.5"):
         activations.update({
             'hardsigmoid': activation.Hardsigmoid,
-            'hardswitch': activation.Hardswish
         })
 
     return activations[name.lower()](**params)

@@ -47,7 +47,9 @@ class default_args():
             if isinstance(arg, (BaseContainer, dict)):
                 # -- This will raise an error if some args
                 # are not defined in self.default_args
-                return OmegaConf.merge(self.default_args, arg)
+                resolved_arg = OmegaConf.to_container(
+                    OmegaConf.create(arg), resolve=True)
+                return OmegaConf.merge(self.default_args, resolved_arg)
             else:
                 raise ValueError(self.error_message)
 

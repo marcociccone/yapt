@@ -324,6 +324,10 @@ class BaseTrainer(ABC):
             self._defaults_yapt,
             self._default_config_args)
 
+        # -- Resolve interpolations to be sure all nodes are explicit
+        self._args = OmegaConf.to_container(self._args, resolve=True)
+        self._args = OmegaConf.create(self._args)
+
         # -- make args structured: it fails if accessing a missing key
         OmegaConf.set_struct(self._args, True)
 
@@ -400,6 +404,10 @@ class BaseTrainer(ABC):
         self._args = OmegaConf.merge(
             self._args, self._cli_args)
         OmegaConf.set_struct(self._args, True)
+
+        # -- Resolve interpolations to be sure all nodes are explicit
+        self._args = OmegaConf.to_container(self._args, resolve=True)
+        self._args = OmegaConf.create(self._args)
 
     def restore_args(self, dir):
         """
