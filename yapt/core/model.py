@@ -40,7 +40,6 @@ class BaseModel(ABC, nn.Module):
         self._best_stats = []
         self._early_stop = False
 
-        self._global_step = 0
         self._train_step = 0
         self._val_step = 0
 
@@ -71,11 +70,19 @@ class BaseModel(ABC, nn.Module):
 
     @property
     def epoch(self):
-        return self._trainer._epoch
+        # Handle the case in which the trainer is not yet been set
+        epoch = 0
+        if hasattr(self, '_trainer') and self._trainer is not None:
+            epoch = self._trainer._epoch
+        return epoch
 
     @property
     def global_step(self):
-        return self._global_step
+        # Handle the case in which the trainer is not yet been set
+        global_step = 0
+        if hasattr(self, '_trainer') and self._trainer is not None:
+            global_step = self._trainer.global_step
+        return global_step
 
     @property
     def train_step(self):
@@ -126,7 +133,6 @@ class BaseModel(ABC, nn.Module):
         outputs = detach_dict(outputs)
         outputs = to_device(outputs, 'cpu')
         self._train_step += 1
-        self._global_step += 1
         return outputs
 
     def validation_step(self, *args, **kwargs) -> dict:
@@ -176,13 +182,13 @@ class BaseModel(ABC, nn.Module):
 
         for _norm in norm_type:
             _grads = self.grad_norm(_norm)
-            self.logger.log_metrics(_grads, self._global_step)
+            self.logger.log_metrics(_grads, self.global_step)
 
     def log_train(self, stats: dict) -> None:
         stats = add_key_dict_prefix(stats, prefix='train', sep='/')
         # Filter out non-scalar items
         metrics = {k: v for k, v in stats.items() if is_scalar(v)}
-        self.logger.log_metrics(metrics, self._global_step)
+        self.logger.log_metrics(metrics, self.global_step)
         # self._log_train()
 
     def log_val(self, descr: str, stats: dict) -> None:
@@ -191,6 +197,69 @@ class BaseModel(ABC, nn.Module):
         metrics = {k: v for k, v in stats.items() if is_scalar(v)}
         self.logger.log_metrics(metrics, self.epoch)
         # self._log_val()
+
+    def aggregate_accum_stats(self, accum_stats_list: list) -> dict:
+        """
+        This function is called to aggregate statistics from consecutive
+        iterations of gradients accumulation before logging the statistics
+        on Neptune or Tensorboard. By default the mean of each key from
+        consecutive runs is returned. Please override `_aggregate_accum_stats`
+        instead on this function, if you want to change its behavior.
+
+        Args:
+            accum_stats_list (List[Dict]): A list of dictionaries of length
+                accum_batches, each one containing the output['stats'] dict
+                returned by the corresponding _training_step() method.
+
+        Returns:
+            A dictionary containing aggregate statistics from multiple
+            accumulation steps.
+
+        """
+        # Skip if there is only one step to aggregate
+        # (i.e., accum_batches = 1)
+        if len(accum_stats_list) == 1:
+            return accum_stats_list[0]
+
+        # Convert from list of dicts to dict of lists
+        paired_stats = {}
+        for stats in accum_stats_list:
+            for key, val in stats.items():
+                if key not in paired_stats:
+                    paired_stats[key] = []
+                paired_stats[key].append(val)
+
+        # Call the user overridable function
+        return self._aggregate_accum_stats(paired_stats)
+
+    def _aggregate_accum_stats(self, paired_stats: dict):
+        """
+        This function is called to aggregate statistics from consecutive
+        iterations of gradients accumulation before logging the statistics
+        on Neptune or Tensorboard. By default the mean of each key from
+        consecutive runs is returned, i.e.,
+        .. code-block:: python
+            return {k: mean(v) for k, v in paired_stats.items()}
+
+        Args:
+            paired_stats (Dict[str, List]): A dictionary of lists containing the
+            same keys of dictionaries returned by _training_step(), but in which
+            values are replaced by lists of length accum_batches. Each list
+            collects the sequence of values of the statistics in consecutive
+            grads accumulation iterations.
+
+        Returns:
+            A dictionary containing aggregate statistics from multiple
+            accumulation steps.
+        """
+        try:
+            # Aggregate with mean
+            return {k: sum(v) / len(v) for k, v in paired_stats.items()}
+        except:
+            self.console_log.exception(
+                "model._aggregate_accum_stats() was not able to aggregate "
+                "statistics from consecutive gradient accumulation steps. "
+                "Please implement a custom _aggregate_accum_stats().")
 
     # ------------------------------------------------------------------
 
@@ -281,8 +350,9 @@ class BaseModel(ABC, nn.Module):
             self.warning_not_implemented()
         return {}
 
+    @call_counter
     def _custom_schedulers(self, *args, **kwargs) -> None:
-        if self.global_step < 1:
+        if self._custom_schedulers.calls < 1:
             self.warning_not_implemented()
 
     def _reset_val_stats(self) -> None:
@@ -398,23 +468,212 @@ class BaseModel(ABC, nn.Module):
 
     # --------------------------------------------------------
 
-    def on_train_start(self):
+    def _init_optimizer_accum(self):
+        """
+        Initialize a dictionary of counters to keep track, for each optimizer,
+        how many times the `optimizer.step()` function has been called. The
+        optimizer itself is used as key of the dictionary.
+        """
+        # If not already, convert into a dict for convenience
+        optim_dict = (self.optimizer
+                      if is_dict(self.optimizer)
+                      else {'optimizer': self.optimizer})
+        # -- Initialize the dict of steps per optimizer
+        self._optimizers_accum = {key: 0 for key in optim_dict.values()}
+
+        # -- Decorate optimizer's step() and zero_grad() with counters
+        for optim in optim_dict.values():
+            optim.step = call_counter(optim.step)
+            optim.zero_grad = call_counter(optim.zero_grad)
+
+        # -- Decorate model zero_grad
+        self.zero_grad = call_counter(self.zero_grad)
+
+    def _check_optimizer_accum(self):
+        """
+        Check if helper functions for `loss.backward()`, `optim.step()` and
+        `optim.zero_grad()` are used instead of the pytorch originals when
+        gradient accumulation or clipping is used.
+        """
+        # If not already, convert into a dict for convenience
+        optim_dict = (self.optimizer
+                      if is_dict(self.optimizer)
+                      else {'optimizer': self.optimizer})
+
+        clip_val = self.args.grads_norm_clip.max_norm
+        accum_batches = self.args.accum_batches
+        if clip_val > 0 or accum_batches > 1:
+            # -- Warning messages stuff
+            warn_pattern = ("{1} has been called directly while using {0}, "
+                            "which will prevent it from working. Please use "
+                            "{2} instead.")
+            used_methods = {'grads clipping': clip_val > 0,
+                            'grads accumulation': accum_batches > 1}
+            methods = "".join(["%s and " % name
+                               for name, active in used_methods.items()
+                               if active])[:-len(" and ")]
+
+            # -- Check if optimizer.step() has been directly called
+            steps_calls = [o.step.calls for o in optim_dict.values()]
+            if max(steps_calls) > 0:
+                self.console_log.warning(
+                    warn_pattern.format(methods, "optimizer.step()",
+                                        "self.optimize_step(optimizer)"))
+
+            # -- Check if optimizer.zero_grad() has been directly called
+            zero_calls = [o.zero_grad.calls for o in optim_dict.values()]
+            if max(zero_calls) > 0:
+                self.console_log.warning(
+                    warn_pattern.format(methods, "optimizer.zero_grad()",
+                                        "self.zero_grad_step(optimizer)"))
+
+            # -- Check if model.zero_grad() has been directly called
+            if self.zero_grad.calls > 0:
+                self.console_log.warning(
+                    warn_pattern.format(methods, "self.zero_grad()",
+                                        "self.zero_grad_step(optimizer)"))
+
+            # -- Check if self.compute_grad_step has been called at least once
+            if self.compute_grad_step.calls == 0:
+                self.console_log.warning(
+                    warn_pattern.format(methods, "loss.backward()",
+                                        "self.compute_grad_step(loss)"))
+
+    @call_counter
+    def compute_grad_step(self, loss):
+        """
+        Compute the backpropagation step given a loss. This function optionally
+        scales the loss by the number of gradient accumulation steps before
+        backward if grads accumulation (accum_batches > 1) is enabled. Use this
+        function in place of `loss.backward()` if you want to use YAPT's
+        gradient accumulation.
+
+        Args:
+            loss (torch.Tensor): The pytorch leaf tensor to backpropagate
+                gradient from
+        """
+        # -- Scale the loss by the number of accumulation steps
+        scaled_loss = loss / self.args.accum_batches
+        scaled_loss.backward()
+
+    def zero_grad_step(self, optimizer):
+        """
+        Zero the parameter gradients of the parameters controlled by the given
+        optimizer. If grads accumulation is enabled (accum_batches > 1),
+        gradients zeroing is only performed once every `accum_batches` steps of
+        the current optimizer. Use this function in place of `optim.zero_grad()`
+        if you want to use YAPT's gradient accumulation.
+
+        Args:
+            optimizer (torch.optim.Optimizer): The optimizer handling the
+                parameters to be zeroed
+        """
+        # -- Zero the parameter gradients only
+        # after accum_batches calls of step()
+        steps = self._optimizers_accum[optimizer]
+        if steps % self.args.accum_batches == 0:
+            # -- Zero the parameters gradients
+            optimizer.zero_grad()
+            optimizer.zero_grad.calls -= 1
+
+    def optimize_step(self, optimizer):
+        """
+        Perform the optimization step, updating the model's parameters based
+        on their gradients. If grads accumulation is enabled (accum_batches > 1)
+        optimization is only performed once every `accum_batches`. This function
+        also optionally performs gradient clipping on the parameters handled by
+        the given optimizer, if required using `grads_norm_clip` arguments. Use
+        this function in place of `optim.step()` if you want to use YAPT's
+        gradient accumulation and clipping.
+
+        Args:
+            optimizer (torch.optim.Optimizer): The optimizer handling the
+                parameters to be updated
+        """
+        # -- Increase number of steps done by the optimizer
+        self._optimizers_accum[optimizer] += 1
+        steps = self._optimizers_accum[optimizer]
+
+        # -- Perform the step only if step(optimizer)
+        # has been called accum_batches times
+        if steps % self.args.accum_batches == 0:
+            # -- Apply grads clipping
+            clip_val = self.args.grads_norm_clip.max_norm
+            norm_type = self.args.grads_norm_clip.norm_type
+            if clip_val is not None and clip_val > 0:
+                # Concatenate all parameter groups parameters, i.e., all
+                # parameters handled by the current optimizer
+                optim_params = sum([pg['params']
+                                    for pg in optimizer.param_groups], [])
+                # Clip only the parameters of the current optimizer
+                nn.utils.clip_grad_norm_(optim_params,
+                                         max_norm=clip_val,
+                                         norm_type=norm_type)
+
+            # -- Perform the actual step
+            optimizer.step()
+            optimizer.step.calls -= 1
+
+    def update_step(self, optimizer, loss):
+        """
+        The update step, i.e., gradients zeroing, gradient computation and
+        parameter update. This is an helper function that aggregates the three
+        steps into a single function. Use this function is you want to use
+        YAPT's gradient accumulation and clipping, or the three separate
+        `zero_grad_step()`, `compute_grad_step()` and `optimize_step()` if you
+        want to adopt a different update logic for whatever reason.
+
+        Args:
+            optimizer (torch.optim.Optimizer): The optimizer handling the
+                parameters to be updated
+            loss (torch.Tensor): The pytorch leaf tensor to backpropagate
+                gradient from
+        """
+        self.zero_grad_step(optimizer)
+        self.compute_grad_step(loss)
+        self.optimize_step(optimizer)
+
+    # --------------------------------------------------------
+
+    def _on_train_start(self):
         pass
+
+    def _on_train_end(self):
+        pass
+
+    def _on_epoch_start(self):
+        pass
+
+    def _on_epoch_end(self):
+        pass
+
+    def _on_validation_start(self, descr: str) -> None:
+        pass
+
+    def _on_validation_end(self, descr: str, outputs_list: list = None) -> None:
+        pass
+
+    def on_train_start(self):
+        # -- Setup counters for grads accum
+        self._init_optimizer_accum()
+        return self._on_epoch_start()
 
     def on_train_end(self):
-        pass
+        return self._on_train_end()
 
     def on_epoch_start(self):
-        pass
+        return self._on_epoch_start()
 
     def on_epoch_end(self):
-        pass
+        # -- Check grads accumulation
+        self._check_optimizer_accum()
+        return self._on_epoch_end()
 
     def on_validation_start(self, descr: str) -> None:
-        pass
+        return self._on_validation_start(descr)
 
     def on_validation_end(self, descr: str, outputs_list: list = None) -> None:
-        pass
+        return self._on_validation_end(descr, outputs_list)
 
     # --------------------------------------------------------
 

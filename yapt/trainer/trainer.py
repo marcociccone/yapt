@@ -421,6 +421,7 @@ class Trainer(BaseTrainer):
         self._model.train()
         # Zero the parameter gradients
         self._model.zero_grad()
+        self._model.zero_grad.calls -= 1
         # Track training statistist
         self._model.init_train_stats()
 
@@ -433,6 +434,7 @@ class Trainer(BaseTrainer):
         try:
             # -- Start epoch
             outputs = None
+            accum_stats = []
             self._model.on_epoch_start()
             for batch_idx, batch in enumerate(self._train_pbar):
                 if batch_idx >= self.num_batches_train:
@@ -454,14 +456,25 @@ class Trainer(BaseTrainer):
                 outputs = self._model.training_step(
                     device_batch)
 
+                # -- Accumulate stats from grads accum steps
+                accum_stats.append(outputs.get('stats', dict()))
+
                 # -- Save output for each training step
                 # self.collect_outputs(outputs)
-                self._global_step = self._model.global_step
 
-                # -- Eventually log statistics
-                if self._global_step % self.log_every == 0:
-                    self._model.log_train(outputs.get('stats', dict()))
-                    self._model.log_grads()
+                if self._model._train_step % self.args.accum_batches == 0:
+                    # -- Increment the global step only
+                    # every accum_batches batches
+                    self._global_step += 1
+
+                    # -- Aggregate stats from grads accum steps
+                    stats = self._model.aggregate_accum_stats(accum_stats)
+                    accum_stats = []
+
+                    # -- Eventually log statistics
+                    if self._global_step % self.log_every == 0:
+                        self._model.log_train(stats)
+                        self._model.log_grads()
 
                 running_tqdm = outputs.get('running_tqdm', dict())
                 # self._train_pbar.set_postfix(ordered_dict=running_tqdm)

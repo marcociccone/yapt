@@ -18,6 +18,11 @@ num_batches_train:
 num_batches_val:
 num_batches_test:
 
+accum_batches: 1
+grads_norm_clip:
+    max_norm: -1
+    norm_type: 2
+
 debug:
     save_inputs: False
 
