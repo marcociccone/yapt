@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.init as init
 
 from functools import partial
+from typing import Sequence
 from torch import optim
 from torch.optim import lr_scheduler
 from torch.nn.modules import activation
@@ -19,6 +20,17 @@ norm_layers = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d,
                nn.GroupNorm, nn.LayerNorm)
 
 
+def calculate_gain(nonlinearity):
+    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
+    gain_nonlinearities = [
+        'conv1d', 'conv2d', 'conv3d',
+        'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d',
+        'linear', 'tanh', 'sigmoid', 'relu', 'leaky_relu'
+    ]
+    if nonlinearity in gain_nonlinearities:
+        return init.calculate_gain(nonlinearity)
+    else:
+        return 1.0
 
 def get_init_linears_fn(name, nonlinearity='relu', bias_init=0.,
                         **init_fn_params):
@@ -47,8 +59,7 @@ def norm_layers_init(m, gamma_init=1.0, bias_init=0.):
 def xavier_uniform_init(m, apply_to=linear_layers,
                         nonlinearity='relu', bias_init=0.,
                         **init_fn_params):
-    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
-    gain = init.calculate_gain(nonlinearity)
+    gain = calculate_gain(nonlinearity)
     if isinstance(m, apply_to):
         init.xavier_uniform_(m.weight, gain=gain, **init_fn_params)
         if m.bias is not None:
@@ -59,8 +70,7 @@ def xavier_normal_init(m, apply_to=linear_layers,
                        nonlinearity='relu', bias_init=0.,
                        **init_fn_params):
 
-    nonlinearity = 'linear' if nonlinearity == 'identity' else nonlinearity
-    gain = init.calculate_gain(nonlinearity)
+    gain = calculate_gain(nonlinearity)
     if isinstance(m, apply_to):
         init.xavier_normal_(m.weight, gain=gain, **init_fn_params)
         if m.bias is not None:
@@ -104,6 +114,10 @@ def get_init_linears_from_args(args, nonlinearity):
     name = args.get('name', 'xavier_uniform')
     bias_init = args.get('bias', 0.)
     init_fn_params = args.get('params', {})
+    print("name init", name)
+    print("bias init", bias_init)
+    print("params init", **init_fn_params)
+
     return get_init_linears_fn(
         name, nonlinearity=nonlinearity,
         bias_init=bias_init,
@@ -113,6 +127,9 @@ def get_init_linears_from_args(args, nonlinearity):
 def get_init_batch_norm_from_args(args):
     gamma_init = args.get('gamma', 1.)
     bias_init = args.get('bias', 0.)
+
+    print("gamma init", gamma_init)
+    print("bias init", bias_init)
     return partial(norm_layers_init,
                    gamma_init=gamma_init,
                    bias_init=bias_init)
@@ -295,6 +312,81 @@ class ToTensor1D(object):
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
+
+
+class CropImage(nn.Module):
+    """Crops image to given size.
+    Args:
+        size
+    """
+
+    def __init__(self, size):
+        super().__init__()
+        self.size = size
+
+    def forward(self, x):
+        return crop_img_tensor(x, self.size)
+
+
+def pad_img_tensor(x: torch.Tensor, size: Sequence[int]) -> torch.Tensor:
+    """Pads a tensor.
+    Pads a tensor of shape (batch, channels, h, w) to new height and width
+    given by a tuple.
+    Args:
+        x (torch.Tensor): Input image
+        size (list or tuple): Desired size (height, width)
+    Returns:
+        The padded tensor
+    """
+
+    return _pad_crop_img(x, size, 'pad')
+
+
+def crop_img_tensor(x: torch.Tensor, size: Sequence[int]) -> torch.Tensor:
+    """Crops a tensor.
+    Crops a tensor of shape (batch, channels, h, w) to new height and width
+    given by a tuple.
+    Args:
+        x (torch.Tensor): Input image
+        size (list or tuple): Desired size (height, width)
+    Returns:
+        The cropped tensor
+    """
+    return _pad_crop_img(x, size, 'crop')
+
+
+def _pad_crop_img(x: torch.Tensor, size: Sequence[int], mode: str) -> torch.Tensor:
+    """ Pads or crops a tensor.
+    Pads or crops a tensor of shape (batch, channels, h, w) to new height
+    and width given by a tuple.
+    Args:
+        x (torch.Tensor): Input image
+        size (list or tuple): Desired size (height, width)
+        mode (str): Mode, either 'pad' or 'crop'
+    Returns:
+        The padded or cropped tensor
+    """
+
+    assert x.dim() == 4 and len(size) == 2
+    size = tuple(size)
+    x_size = x.size()[2:4]
+    if mode == 'pad':
+        cond = x_size[0] > size[0] or x_size[1] > size[1]
+    elif mode == 'crop':
+        cond = x_size[0] < size[0] or x_size[1] < size[1]
+    else:
+        raise ValueError("invalid mode '{}'".format(mode))
+    if cond:
+        raise ValueError('trying to {} from size {} to size {}'.format(
+            mode, x_size, size))
+    dr, dc = (abs(x_size[0] - size[0]), abs(x_size[1] - size[1]))
+    dr1, dr2 = dr // 2, dr - (dr // 2)
+    dc1, dc2 = dc // 2, dc - (dc // 2)
+    if mode == 'pad':
+        return nn.functional.pad(x, [dc1, dc2, dr1, dr2, 0, 0, 0, 0])
+    elif mode == 'crop':
+        return x[:, :, dr1:x_size[0] - dr2, dc1:x_size[1] - dc2]
+
 
 class DisableGradNotScriptContext:
     def __init__(self, model):

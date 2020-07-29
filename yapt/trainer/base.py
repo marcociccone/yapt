@@ -97,6 +97,96 @@ class BaseTrainer(ABC):
     def cli_args(self):
         return self._cli_args
 
+    def restore_from_neptune_or_path(self, args):
+        import neptune
+        reload_check = (args.from_neptune.exp_id, args.from_path)
+        assert sum(bool(el) for el in reload_check) <= 1, \
+            "reload.from_neptune or reload.from_path, pick only one!"
+
+        exp_path = None
+        exp_args = {}
+
+        if args.from_neptune.exp_id is not None:
+            project_name = args.from_neptune.project_name
+            exp_id = args.from_neptune.exp_id
+            assert project_name is not None, \
+                "Specify a project_name to reload a model checkpoint!"
+            data = neptune.init(project_name)
+            exp = data.get_experiments(id=exp_id)[0]
+            params = exp.get_parameters()
+            exp_path = params['loggers.logdir']
+
+            # -- reload from yml file
+            # its easier to manipulate and access with omegaconf
+            exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
+            # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
+            print("Reload from Neptune project {} - ID: {} ...".format(
+                project_name, exp_id))
+
+        if args.from_path is not None:
+            exp_path = args.from_path
+            exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
+            # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
+            print("Reload from path ...")
+
+        # print("Checkpoints dir: {}".format(checkpoints_dir))
+        print("Epoch {}".format(args.epoch))
+
+        # it returns checkpoint_dir and args
+        return exp_path, exp_args
+
+    def reload_checkpoint(self, args, checkpoints_dir, exp_args):
+        from functools import partial
+        def filter_init_epoch(ckp_format, ckp):
+            """Remove random initialization epoch only saved for debug."""
+            return os.path.basename(ckp) != ckp_format.format('init')
+
+        ckp_format = exp_args.loggers.checkpoints_format
+        best_dir = os.path.join(checkpoints_dir, 'best')
+
+        # get all checkpoints filename sorted by last tor first
+        ckp_list = sorted(filter(
+            partial(filter_init_epoch, ckp_format),
+            glob.glob(os.path.join(checkpoints_dir, ckp_format.format('*'))),
+        ))[::-1]
+
+        # get all **best** checkpoints filename sorted by last to first
+        ckp_best_list = sorted(glob.glob(
+            os.path.join(best_dir, ckp_format.format('*'))
+        ))[::-1]
+
+        if args.epoch == 'init':
+            fp = os.path.join(checkpoints_dir, ckp_format.format('init'))
+        elif args.epoch == 'last':
+            fp = ckp_list[0]
+        elif args.epoch == 'best':
+            fp = ckp_best_list[0]
+        else:
+            assert isinstance(args.epoch, int), \
+                "best, last, init or epoch int number!"
+            fp = os.path.join(checkpoints_dir, ckp_format.format(args.epoch))
+
+            # check also in best directory in case it does not exist
+            fp_best = os.path.join(
+                checkpoints_dir, 'best', ckp_format.format(args.epoch))
+            if fp not in ckp_list and fp_best in ckp_best_list:
+                fp = fp_best
+
+            # -- checkpoint is not available
+            if fp not in ckp_list and fp_best not in ckp_best_list:
+                avail_ckp = [os.path.basename(el) for el in ckp_list]
+                avail_best_ckp = [os.path.join('best', os.path.basename(el))
+                                  for el in ckp_best_list]
+                raise FileNotFoundError(
+                    "Checkpoint from epoch {} not found in {} or in best.\n"
+                    "Available checkpoints: \n {} \n {}".format(
+                        args.epoch, checkpoints_dir,
+                        avail_ckp, avail_best_ckp))
+
+        checkpoint = torch.load(fp)
+        print("Reload {}".format(os.path.basename(fp)))
+        return checkpoint
+
     def __init__(self,
                  model_class,
                  extra_args=None,
@@ -119,9 +209,15 @@ class BaseTrainer(ABC):
         # -- If restore_path, args are restored from args.yml
         # default_config_args and default_yapt are not used and
         # only extra_args, cli_args and custom_config are considered.
-        self._restore_path = self.get_maybe_missing_args('restore_path')
-        if self._restore_path == '':
-            self._restore_path = None
+
+
+        # self._restore_path = self.get_maybe_missing_args('restore_path')
+        # if self._restore_path == '':
+        #     self._restore_path = None
+
+        exp_path, exp_args = self.restore_from_neptune_or_path(
+            self.args.restore)
+        self._restore_path = exp_path
 
         if self._restore_path is not None:
             self._args = self.restore_args(self._restore_path)
@@ -325,8 +421,8 @@ class BaseTrainer(ABC):
             self._default_config_args)
 
         # -- Resolve interpolations to be sure all nodes are explicit
-        self._args = OmegaConf.to_container(self._args, resolve=True)
-        self._args = OmegaConf.create(self._args)
+        # self._args = OmegaConf.to_container(self._args, resolve=True)
+        # self._args = OmegaConf.create(self._args)
 
         # -- make args structured: it fails if accessing a missing key
         OmegaConf.set_struct(self._args, True)

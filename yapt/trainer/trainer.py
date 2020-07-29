@@ -82,6 +82,12 @@ class Trainer(BaseTrainer):
         return _results_dir
 
     @property
+    def plots_dir(self):
+        _results_dir = os.path.join(self._logdir, 'plots')
+        safe_mkdirs(_results_dir, True)
+        return _results_dir
+
+    @property
     def images_dir(self):
         _results_dir = os.path.join(self._logdir, 'images')
         safe_mkdirs(_results_dir, True)
@@ -331,6 +337,31 @@ class Trainer(BaseTrainer):
             self.load_checkpoint(self.epoch, is_best=False)
 
     def restore_exp(self):
+        # TODO: fix this
+        checkpoint = self.reload_checkpoint(
+            self.args.restore,
+            os.path.join(self._restore_path, 'checkpoints'),
+            self.args)
+
+        self._global_step = checkpoint.get('global_step', checkpoint.get('seen', 0))
+        self._epoch = checkpoint['epoch']
+
+        self._model.best_epoch = checkpoint.get('best_epoch', -1)
+        self._model.beaten_epochs = checkpoint.get('beaten_epochs', 0)
+        self._model.best_epoch_score = checkpoint.get('best_epoch_score', 0)
+        self._model.best_stats = checkpoint.get('best_stats', [])
+
+        self._model.load_state_dict(checkpoint['model_state_dict'])
+
+        if is_dict(self._model.optimizer):
+            for key in self._model.optimizer.keys():
+                self._model.optimizer.load_state_dict(
+                    checkpoint['optimizer_state_dict'][key])
+        else:
+            self._model.optimizer.load_state_dict(
+                checkpoint['optimizer_state_dict'])
+
+    def restore_exp_old(self):
         """
             If a restore_path is specified it restore a specific checkpoint.
             Otherwise, it finds the last checkpoint in checkpoints_dir and
@@ -661,13 +692,10 @@ class Trainer(BaseTrainer):
     def test(self, dataloader, num_batches, set_name="test", to_numpy=True):
 
         # Load the last / best checkpoint
-        if self._restore_path is not None:
-            self.restore_exp()
-        else:
-            raise ValueError("You should specify the experiment folder!")
+        self.restore_exp()
 
-        print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        self.load_checkpoint(self.best_epoch, is_best=True)
+        # print("Reloading best epoch %d checkpoint" % self._best_epoch)
+        # self.load_checkpoint(self.best_epoch, is_best=True)
 
         out_dict = {}
         if torch.is_grad_enabled():

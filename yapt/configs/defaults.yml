@@ -2,8 +2,14 @@ cuda: True
 dry_run: False
 seed: -1
 verbose: True
-restore_path: ''
 mode: 'train'
+
+restore:
+    epoch: 'last'      # ('last', 'best', int)
+    from_path:
+    from_neptune:
+        project_name: ${loggers.neptune.project_name}
+        exp_id:
 
 data:
     datadir: '${env:YAPT_DATADIR}'  # all datasets are stored in this path (prefix)

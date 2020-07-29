@@ -119,6 +119,10 @@ class ConfusionMatrix(ScikitMetric):
             'fscore': self.fscore
         }
 
+    @property
+    def avg(self):
+        return self.val
+
     def compute_metric(self):
         labels = np.concatenate(self.labels, axis=0)
         preds = np.concatenate(self.preds, axis=0)
@@ -151,6 +155,10 @@ class ROC_AUC(ScikitMetric):
     @property
     def val(self):
         return {'roc_auc': self.roc_auc}
+
+    @property
+    def avg(self):
+        return self.val
 
     def compute_metric(self):
         labels = np.concatenate(self.labels, axis=0)
