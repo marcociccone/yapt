@@ -1,3 +1,6 @@
+import os
+import neptune
+
 from omegaconf import OmegaConf
 from omegaconf.basecontainer import BaseContainer
 from inspect import getfullargspec
@@ -8,6 +11,44 @@ def get_maybe_missing_args(args, key, default=None):
         return default
     else:
         return args.get(key)
+
+
+def reload_args_from_neptune_or_path(args):
+    reload_check = (args.from_neptune.exp_id, args.from_path)
+    assert sum(bool(el) for el in reload_check) <= 1, \
+        "reload.from_neptune or reload.from_path, pick only one!"
+
+    exp_path = None
+    exp_args = {}
+
+    if args.from_neptune.exp_id is not None:
+        project_name = args.from_neptune.project_name
+        exp_id = args.from_neptune.exp_id
+        assert project_name is not None, \
+            "Specify a project_name to reload a model checkpoint!"
+        data = neptune.init(project_name)
+        exp = data.get_experiments(id=exp_id)[0]
+        params = exp.get_parameters()
+        exp_path = params['loggers.logdir']
+
+        # -- reload from yml file
+        # its easier to manipulate and access with omegaconf
+        exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
+        # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
+        print("Reload from Neptune project {} - ID: {} ...".format(
+            project_name, exp_id))
+
+    if args.from_path is not None:
+        exp_path = args.from_path
+        exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
+        # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
+        print("Reload from path ...")
+
+    # print("Checkpoints dir: {}".format(checkpoints_dir))
+    print("Epoch {}".format(args.epoch))
+
+    # it returns checkpoint_dir and args
+    return exp_path, exp_args
 
 
 class default_args():

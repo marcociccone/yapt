@@ -13,7 +13,7 @@ from copy import deepcopy
 from omegaconf import OmegaConf, ListConfig, DictConfig
 
 from yapt.utils.utils import is_dict, is_list, flatten_dict
-from yapt.utils.args import get_maybe_missing_args
+from yapt.utils.args import get_maybe_missing_args, reload_args_from_neptune_or_path
 from yapt.utils.storage import safe_mkdirs
 from yapt.utils.torch_helpers import to_device
 
@@ -97,44 +97,6 @@ class BaseTrainer(ABC):
     def cli_args(self):
         return self._cli_args
 
-    def restore_from_neptune_or_path(self, args):
-        import neptune
-        reload_check = (args.from_neptune.exp_id, args.from_path)
-        assert sum(bool(el) for el in reload_check) <= 1, \
-            "reload.from_neptune or reload.from_path, pick only one!"
-
-        exp_path = None
-        exp_args = {}
-
-        if args.from_neptune.exp_id is not None:
-            project_name = args.from_neptune.project_name
-            exp_id = args.from_neptune.exp_id
-            assert project_name is not None, \
-                "Specify a project_name to reload a model checkpoint!"
-            data = neptune.init(project_name)
-            exp = data.get_experiments(id=exp_id)[0]
-            params = exp.get_parameters()
-            exp_path = params['loggers.logdir']
-
-            # -- reload from yml file
-            # its easier to manipulate and access with omegaconf
-            exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
-            # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
-            print("Reload from Neptune project {} - ID: {} ...".format(
-                project_name, exp_id))
-
-        if args.from_path is not None:
-            exp_path = args.from_path
-            exp_args = OmegaConf.load(os.path.join(exp_path, 'args.yml'))
-            # checkpoints_dir = os.path.join(exp_path, 'checkpoints')
-            print("Reload from path ...")
-
-        # print("Checkpoints dir: {}".format(checkpoints_dir))
-        print("Epoch {}".format(args.epoch))
-
-        # it returns checkpoint_dir and args
-        return exp_path, exp_args
-
     def reload_checkpoint(self, args, checkpoints_dir, exp_args):
         from functools import partial
         def filter_init_epoch(ckp_format, ckp):
@@ -147,19 +109,27 @@ class BaseTrainer(ABC):
         # get all checkpoints filename sorted by last tor first
         ckp_list = sorted(filter(
             partial(filter_init_epoch, ckp_format),
-            glob.glob(os.path.join(checkpoints_dir, ckp_format.format('*'))),
+            [os.path.join(checkpoints_dir, f)
+             for f in os.listdir(checkpoints_dir)]
         ))[::-1]
 
         # get all **best** checkpoints filename sorted by last to first
-        ckp_best_list = sorted(glob.glob(
-            os.path.join(best_dir, ckp_format.format('*'))
-        ))[::-1]
+        ckp_best_list = []
+        if os.path.exists(best_dir):
+            ckp_best_list = sorted(
+                [os.path.join(best_dir, f)
+                 for f in os.listdir(best_dir)]
+            )[::-1]
 
         if args.epoch == 'init':
             fp = os.path.join(checkpoints_dir, ckp_format.format('init'))
         elif args.epoch == 'last':
+            if len(ckp_list) == 0:
+                raise ValueError("No checkpoints available in {}".format(checkpoints_dir))
             fp = ckp_list[0]
         elif args.epoch == 'best':
+            if len(ckp_best_list) == 0:
+                raise ValueError("No checkpoints available in {}".format(best_dir))
             fp = ckp_best_list[0]
         else:
             assert isinstance(args.epoch, int), \
@@ -210,12 +180,11 @@ class BaseTrainer(ABC):
         # default_config_args and default_yapt are not used and
         # only extra_args, cli_args and custom_config are considered.
 
-
         # self._restore_path = self.get_maybe_missing_args('restore_path')
         # if self._restore_path == '':
         #     self._restore_path = None
 
-        exp_path, exp_args = self.restore_from_neptune_or_path(
+        exp_path, exp_args = reload_args_from_neptune_or_path(
             self.args.restore)
         self._restore_path = exp_path
 
@@ -272,6 +241,8 @@ class BaseTrainer(ABC):
                 logdir = os.path.join(logdir, 'debug')
 
             # TODO: this should be generalized
+            args.exp_name = args.exp_name.replace(' ', '_')
+            args.exp_name = args.exp_name.replace(',', '')
             self._logdir = os.path.join(
                 logdir,
                 args.data.dataset_name.lower(),

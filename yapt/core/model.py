@@ -1,3 +1,5 @@
+import torch
+import numpy as np
 import logging
 import torch.nn as nn
 
@@ -13,7 +15,7 @@ from yapt.utils.debugging import call_counter, native, is_native
 from yapt.utils.args import get_maybe_missing_args
 from yapt.utils.utils import (warning_not_implemented,
                               add_key_dict_prefix, is_list, is_scalar,
-                              is_dict, recursive_keys)
+                              is_dict, recursive_keys, collate_fn, create_batches)
 
 
 def is_pickable(obj):
@@ -695,7 +697,13 @@ class BaseModel(ABC, nn.Module):
     def _on_epoch_end(self):
         pass
 
-    def _on_validation_start(self, descr: str) -> None:
+    def collate_fn(self, list_dict, debug=False, merge='cat', dim=0):
+        return collate_fn(list_dict, debug=debug, merge=merge, dim=dim)
+
+    def create_batches(self, list_dict, batch_size=200):
+        return create_batches(list_dict, batch_size=batch_size)
+
+    def on_validation_start(self, descr: str) -> None:
         pass
 
     def _on_validation_end(self, descr: str, outputs_list: list = None) -> None:

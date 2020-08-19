@@ -577,7 +577,7 @@ class Trainer(BaseTrainer):
                     output_val[kk] = self.validate(
                         vv, self.num_batches_val[kk],
                         set_name=kk, logger=self._logger)
-                    self.save_results(output_val[kk], kk, self.epoch)
+                    # self.save_results(output_val[kk], kk, self.epoch)
                 print("")
 
                 is_best, best_score = self._model.early_stopping(
@@ -594,7 +594,7 @@ class Trainer(BaseTrainer):
                 output_test[kk] = self.validate(
                     vv, self.num_batches_test[kk],
                     set_name=kk, logger=self._logger)
-                self.save_results(output_test[kk], kk, self.epoch)
+                # self.save_results(output_test[kk], kk, self.epoch)
             print("")
         else:
             output_test = output_val[kk]
@@ -654,7 +654,7 @@ class Trainer(BaseTrainer):
 
         # --------------------------------------------------------------------
 
-        self._model.on_validation_end(set_name, outputs_list)
+        outputs_dict = self._model.on_validation_end(set_name, outputs_list)
         self._model.reset_val_stats()
         if outputs is not None:
             if logger is not None:
@@ -666,7 +666,7 @@ class Trainer(BaseTrainer):
             final_tqdm = stats_to_str(outputs.get('final_tqdm', dict()))
             print("  %s - %s" % (set_name.title(), final_tqdm))
 
-        return outputs
+        return outputs_dict
 
     def only_test(self):
 
@@ -686,7 +686,7 @@ class Trainer(BaseTrainer):
                 output_test[kk] = self.validate(
                     vv, self.num_batches_test[kk],
                     set_name=kk, logger=self._logger)
-                self.save_results(output_test[kk], kk)
+                # self.save_results(output_test[kk], kk)
             return output_test
 
     def test(self, dataloader, num_batches, set_name="test", to_numpy=True):

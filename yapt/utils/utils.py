@@ -8,6 +8,44 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+def collate_fn(list_dict, debug=False, merge='cat', dim=0):
+    """
+        Collate function: from list-of-dicts to dict-of-lists
+    """
+
+    assert merge in ('cat', 'stack'), "Only stack or cat"
+
+    dict_list = {k: [dic[k] for dic in list_dict] for k in list_dict[0]}
+    for k, v in dict_list.items():
+        if torch.is_tensor(v[0]):
+            if debug:
+                print("pre", k, len(v), v[0].shape)
+
+            if merge == 'cat':
+                # -- use when batch_size already exist
+                dict_list[k] = torch.cat(v, dim=dim)
+            elif merge == 'stack':
+                dict_list[k] = torch.stack(v, dim=dim)
+
+            if debug:
+                print("post", k, dict_list[k].shape)
+
+        elif isinstance(v[0], (np.ndarray, list)):
+            dict_list[k] = np.array(v)
+
+    return dict_list
+
+
+def create_batches(list_dict, batch_size=200):
+    """
+        Create batches from list of tasks
+    """
+
+    chunks = [list_dict[x:x+batch_size] for x in range(0, len(list_dict), batch_size)]
+    batches = [collate_fn(c, merge='cat', dim=0) for c in chunks]
+    return batches
+
+
 def recursive_keys(_dict):
     """
     Helper function that visits recursively a dictionary and print its keys.

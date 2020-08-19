@@ -3,6 +3,7 @@ dry_run: False
 seed: -1
 verbose: True
 mode: 'train'
+custom_config:
 
 restore:
     epoch: 'last'      # ('last', 'best', int)
