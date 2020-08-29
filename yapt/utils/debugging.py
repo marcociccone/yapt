@@ -26,3 +26,16 @@ def call_counter(fn):
     helper.__name__ = fn.__name__
 
     return helper
+
+
+def native(fn):
+    @wraps(fn)
+    def helper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    helper.is_native = True
+    helper.__name__ = fn.__name__
+    return helper
+
+
+def is_native(fn):
+    return hasattr(fn, 'is_native') and fn.is_native

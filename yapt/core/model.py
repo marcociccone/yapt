@@ -9,7 +9,7 @@ from yapt import BaseTrainer
 from yapt.loggers.base import LoggerDict
 from yapt.utils.torch_helpers import (get_optimizer, get_scheduler_optimizer,
                                       detach_dict, to_device)
-from yapt.utils.debugging import call_counter
+from yapt.utils.debugging import call_counter, native, is_native
 from yapt.utils.args import get_maybe_missing_args
 from yapt.utils.utils import (warning_not_implemented,
                               add_key_dict_prefix, is_list, is_scalar,
@@ -98,33 +98,64 @@ class BaseModel(ABC, nn.Module):
 
     # Helpers
     # --------------------------------------------------------
+    @native
     def warning_not_implemented(self):
         print("")
         warning_not_implemented(self.console_log, level=2)
 
+    @native
     def get_maybe_missing_args(self, key, default=None):
         return get_maybe_missing_args(self.args, key, default)
 
+    @native
     def set_trainer(self, trainer):
         self._trainer = trainer
 
+    @native
+    def check_native(self):
+        msg_private = ("{} has been overridden! You should override "
+                       "the private method ({}) instead, or decorate "
+                       "the function with @native if you really know "
+                       "what you are doing!")
+        msg = ("{} has been overridden! Decorate the function with @native "
+               "if you really know what you are doing!")
+
+        # Retrieve BaseModel's native functions
+        native_fn = [name
+                     for name, fn in BaseModel.__dict__.items()
+                     if is_native(fn)]
+
+        # Check if these functions are still native in self
+        for fname in native_fn:
+            if not is_native(getattr(self, fname)):
+                self.console_log.warning(
+                    (msg_private.format(fname, "_"+fname))
+                    if hasattr(self, "_"+fname)
+                    else msg.format(fname))
+
     # --------------------------------------------------------
 
+    @native
     def build_model(self):
         self._build_model()
 
+    @native
     def configure_optimizer(self) -> dict:
         return self._configure_optimizer()
 
+    @native
     def configure_scheduler_optimizer(self) -> dict:
         return self._configure_scheduler_optimizer()
 
+    @native
     def custom_schedulers(self, *args, **kwargs) -> None:
         self._custom_schedulers(*args, **kwargs)
 
+    @native
     def reset_params(self) -> None:
         self._reset_params()
 
+    @native
     def training_step(self, batch, *args, **kwargs) -> dict:
         self.train()
         outputs = self._training_step(batch, *args, **kwargs)
@@ -135,6 +166,7 @@ class BaseModel(ABC, nn.Module):
         self._train_step += 1
         return outputs
 
+    @native
     def validation_step(self, *args, **kwargs) -> dict:
         self.eval()
         outputs = self._validation_step(*args, **kwargs)
@@ -145,6 +177,7 @@ class BaseModel(ABC, nn.Module):
         self._val_step += 1
         return outputs
 
+    @native
     def test_step(self, *args, **kwargs) -> dict:
         self.eval()
         outputs = self._test_step(*args, **kwargs)
@@ -156,22 +189,27 @@ class BaseModel(ABC, nn.Module):
 
     # --------------------------------------------------------
 
+    @native
     def init_val_stats(self) -> None:
         self.reset_val_stats()
 
+    @native
     def init_train_stats(self) -> None:
         self.reset_train_stats()
 
+    @native
     def reset_train_stats(self) -> None:
         self._train_step = 0
         self._train_meters = OrderedDict()
         self._reset_train_stats()
 
+    @native
     def reset_val_stats(self) -> None:
         self._val_step = 0
         self._val_meters = OrderedDict()
         self._reset_val_stats()
 
+    @native
     def log_grads(self):
         norm_type = self.args.loggers.log_grads_norm
         if not norm_type or norm_type < 0:
@@ -184,6 +222,7 @@ class BaseModel(ABC, nn.Module):
             _grads = self.grad_norm(_norm)
             self.logger.log_metrics(_grads, self.global_step)
 
+    @native
     def log_train(self, stats: dict) -> None:
         stats = add_key_dict_prefix(stats, prefix='train', sep='/')
         # Filter out non-scalar items
@@ -191,6 +230,7 @@ class BaseModel(ABC, nn.Module):
         self.logger.log_metrics(metrics, self.global_step)
         # self._log_train()
 
+    @native
     def log_val(self, descr: str, stats: dict) -> None:
         stats = add_key_dict_prefix(stats, prefix=descr, sep='/')
         # Filter out non-scalar items
@@ -198,6 +238,7 @@ class BaseModel(ABC, nn.Module):
         self.logger.log_metrics(metrics, self.epoch)
         # self._log_val()
 
+    @native
     def aggregate_accum_stats(self, accum_stats_list: list) -> dict:
         """
         This function is called to aggregate statistics from consecutive
@@ -382,6 +423,7 @@ class BaseModel(ABC, nn.Module):
         self._best_epoch = self.epoch
         self._beaten_epochs = 0
 
+    @native
     def early_stopping(self, current_stats: dict) -> (bool, bool):
         """This function implements a classic early stopping
         procedure with patience. An example of the arguments that
@@ -468,6 +510,7 @@ class BaseModel(ABC, nn.Module):
 
     # --------------------------------------------------------
 
+    @native
     def _init_optimizer_accum(self):
         """
         Initialize a dictionary of counters to keep track, for each optimizer,
@@ -489,6 +532,7 @@ class BaseModel(ABC, nn.Module):
         # -- Decorate model zero_grad
         self.zero_grad = call_counter(self.zero_grad)
 
+    @native
     def _check_optimizer_accum(self):
         """
         Check if helper functions for `loss.backward()`, `optim.step()` and
@@ -539,6 +583,7 @@ class BaseModel(ABC, nn.Module):
                     warn_pattern.format(methods, "loss.backward()",
                                         "self.compute_grad_step(loss)"))
 
+    @native
     @call_counter
     def compute_grad_step(self, loss):
         """
@@ -556,6 +601,7 @@ class BaseModel(ABC, nn.Module):
         scaled_loss = loss / self.args.accum_batches
         scaled_loss.backward()
 
+    @native
     def zero_grad_step(self, optimizer):
         """
         Zero the parameter gradients of the parameters controlled by the given
@@ -576,6 +622,7 @@ class BaseModel(ABC, nn.Module):
             optimizer.zero_grad()
             optimizer.zero_grad.calls -= 1
 
+    @native
     def optimize_step(self, optimizer):
         """
         Perform the optimization step, updating the model's parameters based
@@ -614,6 +661,7 @@ class BaseModel(ABC, nn.Module):
             optimizer.step()
             optimizer.step.calls -= 1
 
+    @native
     def update_step(self, optimizer, loss):
         """
         The update step, i.e., gradients zeroing, gradient computation and
@@ -653,30 +701,41 @@ class BaseModel(ABC, nn.Module):
     def _on_validation_end(self, descr: str, outputs_list: list = None) -> None:
         pass
 
+    @native
     def on_train_start(self):
         # -- Setup counters for grads accum
         self._init_optimizer_accum()
+
+        # -- Check native functions
+        self.check_native()
+
         return self._on_epoch_start()
 
+    @native
     def on_train_end(self):
         return self._on_train_end()
 
+    @native
     def on_epoch_start(self):
         return self._on_epoch_start()
 
+    @native
     def on_epoch_end(self):
         # -- Check grads accumulation
         self._check_optimizer_accum()
         return self._on_epoch_end()
 
+    @native
     def on_validation_start(self, descr: str) -> None:
         return self._on_validation_start(descr)
 
+    @native
     def on_validation_end(self, descr: str, outputs_list: list = None) -> None:
         return self._on_validation_end(descr, outputs_list)
 
     # --------------------------------------------------------
 
+    @native
     def freeze(self):
         r"""
         Freeze all params for inference, saving the gradient state
@@ -692,6 +751,7 @@ class BaseModel(ABC, nn.Module):
             param.requires_grad = False
         self.eval()
 
+    @native
     def unfreeze(self):
         """Unfreeze all params restoring the gradient state before freeze.
         .. code-block:: python
@@ -703,6 +763,7 @@ class BaseModel(ABC, nn.Module):
             param.requires_grad = self.requires_grad_snaphot[name]
         self.train()
 
+    @native
     def grad_norm(self, norm_type, sep='/'):
         """
         Module to describe gradients
