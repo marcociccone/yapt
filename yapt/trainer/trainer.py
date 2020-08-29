@@ -361,34 +361,6 @@ class Trainer(BaseTrainer):
             self._model.optimizer.load_state_dict(
                 checkpoint['optimizer_state_dict'])
 
-    def restore_exp_old(self):
-        """
-            If a restore_path is specified it restore a specific checkpoint.
-            Otherwise, it finds the last checkpoint in checkpoints_dir and
-            reload it.
-        """
-
-        ckp_format = self.checkpoints_format
-        if os.path.isfile(self._restore_path):
-            # check if restart_path is a specific checkpoint
-            self.console_log.info("Reload checkpoint: %s", self._restore_path)
-            self.load_checkpoint(self._restore_path)
-        else:
-            # restore last one
-            regex = re.compile(r'.*' + ckp_format.format('(\d+)'))
-
-            _, ext = os.path.splitext(ckp_format)
-            checkpoints = glob.glob(os.path.join(
-                self._restore_path, 'checkpoints', "*{}".format(ext)))
-            checkpoints = list(filter(lambda x: 'init' not in x, checkpoints))
-
-            # Sort checkpoints
-            checkpoints = sorted(
-                checkpoints, key=lambda f: int(regex.findall(f)[0]))
-            last_checkpoint = checkpoints[-1]
-            self.console_log.info("Reload checkpoint: %s", last_checkpoint)
-            self.load_checkpoint(last_checkpoint)
-
     def save_last_checkpoint(self):
         last_checkpoint = self.last_checkpoint
         self.save_checkpoint()
@@ -453,7 +425,7 @@ class Trainer(BaseTrainer):
         # Zero the parameter gradients
         self._model.zero_grad()
         self._model.zero_grad.calls -= 1
-        # Track training statistist
+        # Track training statistics
         self._model.init_train_stats()
 
         pbar_descr_prefix = "ep %d (best: %d beaten: %d) - " % (
@@ -580,8 +552,10 @@ class Trainer(BaseTrainer):
                     # self.save_results(output_val[kk], kk, self.epoch)
                 print("")
 
+                # -- get only the last (because of running stats)
+                current_stats = {k: v[-1] for k, v in output_val.items()}
                 is_best, best_score = self._model.early_stopping(
-                    output_val)
+                    current_stats)
                 self.save_best_checkpoint(is_best)
 
         self._model.on_train_end()
@@ -694,9 +668,6 @@ class Trainer(BaseTrainer):
         # Load the last / best checkpoint
         self.restore_exp()
 
-        # print("Reloading best epoch %d checkpoint" % self._best_epoch)
-        # self.load_checkpoint(self.best_epoch, is_best=True)
-
         out_dict = {}
         if torch.is_grad_enabled():
             self.console_log.warning("You should handle no_grad by yourself for now!")
@@ -723,6 +694,9 @@ class Trainer(BaseTrainer):
 
         self._test_pbar.clear()
         self._test_pbar.close()
+
+        # TODO: -- call collate_fn in _on_test_end instead of doing it explicitely
+        # out_dict = self.model.on_test_end(outputs_list)
 
         # -- Aggregate on batch dimension
         for key, val in out_dict.items():

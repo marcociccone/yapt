@@ -316,7 +316,7 @@ class BaseModel(ABC, nn.Module):
         pass
 
     def _configure_optimizer(self, parameters=None):
-        # -- if not specified, get tall the model parameters
+        # -- if not specified, get all the model parameters
         parameters = self.parameters() if parameters is None else parameters
 
         args = self.args
@@ -697,17 +697,17 @@ class BaseModel(ABC, nn.Module):
     def _on_epoch_end(self):
         pass
 
-    def collate_fn(self, list_dict, debug=False, merge='cat', dim=0):
-        return collate_fn(list_dict, debug=debug, merge=merge, dim=dim)
-
-    def create_batches(self, list_dict, batch_size=200):
-        return create_batches(list_dict, batch_size=batch_size)
-
-    def on_validation_start(self, descr: str) -> None:
+    def _on_validation_start(self, descr: str) -> None:
         pass
 
     def _on_validation_end(self, descr: str, outputs_list: list = None) -> None:
+        return outputs_list
+
+    def _on_test_start(self, descr: str) -> None:
         pass
+
+    def _on_test_end(self, descr: str, outputs_list: list = None) -> None:
+        return outputs_list
 
     @native
     def on_train_start(self):
@@ -740,6 +740,20 @@ class BaseModel(ABC, nn.Module):
     @native
     def on_validation_end(self, descr: str, outputs_list: list = None) -> None:
         return self._on_validation_end(descr, outputs_list)
+
+    @native
+    def on_test_start(self, descr: str) -> None:
+        return self._on_test_start(descr)
+
+    @native
+    def on_test_end(self, descr: str, outputs_list: list = None) -> None:
+        return self.on_test_end(descr, outputs_list)
+
+    def collate_fn(self, list_dict, debug=False, merge='cat', dim=0):
+        return collate_fn(list_dict, debug=debug, merge=merge, dim=dim)
+
+    def create_batches(self, list_dict, batch_size=200):
+        return create_batches(list_dict, batch_size=batch_size)
 
     # --------------------------------------------------------
 
