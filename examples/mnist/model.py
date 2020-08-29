@@ -66,9 +66,11 @@ class Classifier(BaseModel):
         y_probs = self.forward(x)
         loss = self.loss(y, y_probs)
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        self.update_step(self.optimizer, loss)
+        # Or equivalently, the following 3 lines:
+        # self.zero_grad_step(self.optimizer)
+        # self.compute_grad_step(loss)
+        # self.optimize_step(self.optimizer)
 
         self._train_meters['loss'].update(loss)
         stats = {'loss': loss}
