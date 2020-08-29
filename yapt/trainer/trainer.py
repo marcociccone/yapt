@@ -316,7 +316,7 @@ class Trainer(BaseTrainer):
 
         if is_dict(self._model.optimizer):
             for key in self._model.optimizer.keys():
-                self._model.optimizer.load_state_dict(
+                self._model.optimizer[key].load_state_dict(
                     checkpoint['optimizer_state_dict'][key])
         else:
             self._model.optimizer.load_state_dict(
