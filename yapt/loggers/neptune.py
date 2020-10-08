@@ -23,7 +23,7 @@ except ImportError:  # pragma: no-cover
     raise ImportError('You want to use `neptune` logger which is not installed yet,'  # pragma: no-cover
                       ' install it with `pip install neptune-client`.')
 try:
-    import neptunecontrib
+    from neptunecontrib import api
 except ImportError:  # pragma: no-cover
     raise ImportError('You want to use `neptune-contrib` which is not installed yet,'  # pragma: no-cover
                       ' install it with `pip install neptune-contrib for extra features`.')
@@ -332,7 +332,7 @@ class NeptuneLogger(LoggerBase):
                 | Figure from `matplotlib` or `plotly`. If you want to use global figure from `matplotlib`, you
                   can also pass reference to `matplotlib.pyplot` module.
         """
-        neptunecontrib.api.log_chart(log_name, chart, self.experiment)
+        api.log_chart(log_name, chart, self.experiment)
 
     @rank_zero_only
     def log_image(self, log_name: str, image: Union[str, Any], step: Optional[int] = None) -> None:
