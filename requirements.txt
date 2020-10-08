@@ -12,3 +12,12 @@ scikit-learn
 scikit-image
 torch
 tqdm
+ipython
+tensorboard
+neptune-client
+neptune-contrib
+omegaconf==2.0.0rc15
+tabulate
+ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-0.9.0.dev0-cp36-cp36m-manylinux1_x86_64.whl
+ray[tune]
+sacred
