@@ -747,7 +747,7 @@ class BaseModel(ABC, nn.Module):
 
     @native
     def on_test_end(self, descr: str, outputs_list: list = None) -> None:
-        return self.on_test_end(descr, outputs_list)
+        return self._on_test_end(descr, outputs_list)
 
     def collate_fn(self, list_dict, debug=False, merge='cat', dim=0):
         return collate_fn(list_dict, debug=debug, merge=merge, dim=dim)
