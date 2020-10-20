@@ -717,7 +717,7 @@ class BaseModel(ABC, nn.Module):
         # -- Check native functions
         self.check_native()
 
-        return self._on_epoch_start()
+        return self._on_train_start()
 
     @native
     def on_train_end(self):
