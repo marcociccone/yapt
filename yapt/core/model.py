@@ -791,22 +791,16 @@ class BaseModel(ABC, nn.Module):
         Module to describe gradients
         """
         results = {}
-        total_norm = 0
         for name, p in self.named_parameters():
             if p.requires_grad:
                 try:
-                    param_norm = p.grad.data.norm(norm_type)
-                    total_norm += param_norm ** norm_type
-                    norm = param_norm ** (1 / norm_type)
-
-                    grad = round(norm.data.cpu().numpy().flatten()[0], 3)
+                    norm = float(p.grad.data.norm(norm_type))
                     key = 'grads_norm_{}{}{}'.format(norm_type, sep, name)
-                    results[key] = grad
+                    results[key] = round(norm, 3)
                 except Exception:
                     # this param had no grad
                     pass
 
-        total_norm = total_norm ** (1. / norm_type)
-        grad = round(total_norm.data.cpu().numpy().flatten()[0], 3)
-        results['grad_{}_norm_total'.format(norm_type)] = grad
+        total_norm = float(torch.tensor(list(results.values())).norm(norm_type))
+        results['grad_{}_norm_total'.format(norm_type)] = round(total_norm, 3)
         return results
